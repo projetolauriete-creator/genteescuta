@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from '@/components/LinkSemPrefetch'
-import { UserX, CheckCircle2, XCircle, MessageSquare, Trash2, Check, X as XIcon, Loader2, CircleCheck, Circle } from 'lucide-react'
+import { UserX, CheckCircle2, XCircle, MessageSquare, Trash2, Check, X as XIcon, Loader2, CircleCheck, Circle, CheckCheck, RotateCcw } from 'lucide-react'
 import {
   listarManifestacoes, marcarAnalise, responderPeloPortal, excluirManifestacao,
   aprovarReconhecimentoNaLista, reprovarReconhecimentoNaLista,
+  concluirManifestacao, reabrirManifestacao,
 } from '@/lib/fb/admin'
 import { usuarioAtual } from '@/lib/fb/auth'
 import { CabecalhoPagina, Cartao, Chip, Scorecard, Vazio, Botao } from '@/components/ui'
@@ -16,6 +17,8 @@ import {
   TRIAGEM_LABEL,
   ANALISE_LABEL,
   AREAS_SUGESTAO,
+  STATUS_FLUXO,
+  STATUS_MANIFESTACAO_LABEL,
   type ManifestacaoTipo,
   type Triagem,
   type AnaliseStatus,
@@ -37,6 +40,7 @@ export default function CanalAdmin() {
   const [fCategoria, setFCategoria] = useState('')
   const [fAnalise, setFAnalise] = useState('')
   const [fAprovacao, setFAprovacao] = useState('')
+  const [fStatus, setFStatus] = useState('')
   const [acaoBusy, setAcaoBusy] = useState('')         // id em ação
   const [respondendo, setRespondendo] = useState<any | null>(null) // manifestação sendo respondida
   const [erroAcao, setErroAcao] = useState<string | null>(null)
@@ -58,6 +62,8 @@ export default function CanalAdmin() {
   }
 
   const alternarAnalise = (m: any) => rodar(m.id, () => marcarAnalise(m.id, analiseDe(m) !== 'analisada', autorAtual()))
+  const concluir = (m: any) => rodar(m.id, () => concluirManifestacao(m.id, autorAtual()))
+  const reabrir = (m: any) => rodar(m.id, () => reabrirManifestacao(m.id, autorAtual()))
   const aprovar = (m: any) => rodar(m.id, () => aprovarReconhecimentoNaLista(m, autorAtual()))
   const reprovar = (m: any) => {
     if (!confirm('Reprovar este reconhecimento? Ele não será publicado no mural.')) return
@@ -80,13 +86,14 @@ export default function CanalAdmin() {
       if (fCategoria && (m.categoria ?? m.area) !== fCategoria) return false
       if (fAnalise && analiseDe(m) !== fAnalise) return false
       if (fAprovacao && m.triagem !== fAprovacao) return false
+      if (fStatus && (m.status ?? 'recebida') !== fStatus) return false
       if (termo) {
         const alvo = semAcento([m.titulo, m.nome, m.descricao, m.problema, m.sugestao, m.categoria, m.area, m.departamento, m.centro_custo].join(' '))
         if (!alvo.includes(termo)) return false
       }
       return true
     }),
-    [todas, fTipo, fCategoria, fAnalise, fAprovacao, termo],
+    [todas, fTipo, fCategoria, fAnalise, fAprovacao, fStatus, termo],
   )
 
   const naoAnalisadas = todas.filter((m) => analiseDe(m) !== 'analisada').length
@@ -115,6 +122,7 @@ export default function CanalAdmin() {
           onBusca={setBusca}
           buscaPlaceholder="Buscar por assunto, nome, setor ou texto…"
           grupos={[
+            { rotulo: 'Status', valor: fStatus, onChange: setFStatus, opcoes: STATUS_FLUXO.map((s) => ({ valor: s, rotulo: STATUS_MANIFESTACAO_LABEL[s] })) },
             { rotulo: 'Triagem', valor: fAnalise, onChange: setFAnalise, opcoes: ANALISES.map((a) => ({ valor: a, rotulo: ANALISE_LABEL[a] })) },
             { rotulo: 'Aprovação', valor: fAprovacao, onChange: setFAprovacao, opcoes: APROVACOES.map((t) => ({ valor: t, rotulo: TRIAGEM_LABEL[t] })) },
             { rotulo: 'Tipo', valor: fTipo, onChange: setFTipo, opcoes: TIPOS.map((t) => ({ valor: t, rotulo: TIPO_MANIFESTACAO_LABEL[t] })) },
@@ -193,6 +201,15 @@ export default function CanalAdmin() {
                             >
                               <MessageSquare size={15} aria-hidden />
                             </BtnAcao>
+                            {m.status === 'concluida' ? (
+                              <BtnAcao title="Reabrir o assunto" tom="neutro" disabled={busy} onClick={() => reabrir(m)}>
+                                <RotateCcw size={15} aria-hidden />
+                              </BtnAcao>
+                            ) : (
+                              <BtnAcao title="Marcar como concluída (encerrar)" tom="ok" disabled={busy} onClick={() => concluir(m)}>
+                                <CheckCheck size={15} aria-hidden />
+                              </BtnAcao>
+                            )}
                             <BtnAcao title="Excluir" tom="perigo" disabled={busy} onClick={() => excluir(m)}>
                               <Trash2 size={15} aria-hidden />
                             </BtnAcao>

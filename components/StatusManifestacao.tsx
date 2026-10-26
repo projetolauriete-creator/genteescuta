@@ -1,10 +1,12 @@
-import { Check, Clock, Search, Hammer, CircleSlash, Archive, Inbox } from 'lucide-react'
+import { Check, CheckCheck, Clock, Search, Hammer, CircleSlash, Archive, Inbox, MessageSquare } from 'lucide-react'
 import { Chip } from './ui'
 import { STATUS_MANIFESTACAO_LABEL, type ManifestacaoStatus } from '@/lib/types'
 import { fmtDataHora } from '@/lib/format'
 
 const TOM: Record<ManifestacaoStatus, 'neutro' | 'marca' | 'baixo' | 'moderado'> = {
   recebida: 'neutro',
+  respondida: 'marca',
+  concluida: 'baixo',
   em_analise: 'marca',
   analisada: 'marca',
   em_implementacao: 'marca',
@@ -15,6 +17,8 @@ const TOM: Record<ManifestacaoStatus, 'neutro' | 'marca' | 'baixo' | 'moderado'>
 
 const ICONE: Record<ManifestacaoStatus, typeof Check> = {
   recebida: Inbox,
+  respondida: MessageSquare,
+  concluida: CheckCheck,
   em_analise: Search,
   analisada: Clock,
   em_implementacao: Hammer,
@@ -23,7 +27,23 @@ const ICONE: Record<ManifestacaoStatus, typeof Check> = {
   arquivada: Archive,
 }
 
+// Cores do fluxo principal: Recebida (cinza), Respondida (azul), Concluída (verde).
+const COR_FLUXO: Partial<Record<ManifestacaoStatus, string>> = {
+  recebida: 'border-borda bg-superficie-2 text-tinta-2',
+  respondida: 'border-[#bcd9f7] bg-[#eaf2fd] text-[#14498a]',
+  concluida: 'border-[#cfe6b8] bg-[#eef7e3] text-verde-escuro',
+}
+
 export function StatusChip({ status }: { status: ManifestacaoStatus }) {
+  const cor = COR_FLUXO[status]
+  const Icone = ICONE[status] ?? Inbox
+  if (cor) {
+    return (
+      <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${cor}`}>
+        <Icone size={12} strokeWidth={2.4} aria-hidden /> {STATUS_MANIFESTACAO_LABEL[status]}
+      </span>
+    )
+  }
   return <Chip faixa={TOM[status]}>{STATUS_MANIFESTACAO_LABEL[status]}</Chip>
 }
 

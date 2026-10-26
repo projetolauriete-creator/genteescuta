@@ -2,8 +2,8 @@
 
 import { Suspense, useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Mail, UserX, MapPin, Calendar, User, Building2, CheckCircle2, XCircle, MessageSquare } from 'lucide-react'
-import { getManifestacao, triarManifestacao, responderPeloPortal } from '@/lib/fb/admin'
+import { Mail, UserX, MapPin, Calendar, User, Building2, CheckCircle2, XCircle, MessageSquare, CheckCheck, RotateCcw } from 'lucide-react'
+import { getManifestacao, triarManifestacao, responderPeloPortal, concluirManifestacao, reabrirManifestacao } from '@/lib/fb/admin'
 import { usuarioAtual } from '@/lib/fb/auth'
 import { CabecalhoPagina, Cartao, Chip, Aviso, Botao } from '@/components/ui'
 import { LinhaDoTempo, StatusChip } from '@/components/StatusManifestacao'
@@ -79,6 +79,7 @@ function Detalhe() {
             )}
           </Cartao>
 
+          <AndamentoStatus m={m} aoSalvar={recarregar} />
           <PainelTriagem m={m} aoSalvar={recarregar} />
           <ResponderParticular m={m} aoSalvar={recarregar} />
 
@@ -188,6 +189,36 @@ function PainelTriagem({ m, aoSalvar }: { m: any; aoSalvar: () => void }) {
               <XCircle size={15} aria-hidden /> Reprovar…
             </Botao>
           </div>
+        )}
+      </div>
+    </Cartao>
+  )
+}
+
+// Andamento: status do assunto, com concluir/reabrir manual.
+function AndamentoStatus({ m, aoSalvar }: { m: any; aoSalvar: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const concluida = m.status === 'concluida'
+  async function agir(fn: () => Promise<unknown>) {
+    setBusy(true)
+    try { await fn(); aoSalvar() } catch { /* silencioso */ }
+    setBusy(false)
+  }
+  return (
+    <Cartao titulo="Andamento" apoio="O status reflete a resposta: Recebida, Respondida e Concluída.">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-tinta-2">Status atual:</span>
+          <StatusChip status={m.status ?? 'recebida'} />
+        </div>
+        {concluida ? (
+          <Botao type="button" variante="secundario" onClick={() => agir(() => reabrirManifestacao(m.id, usuarioAtual()?.email ?? 'Equipe'))} disabled={busy}>
+            <RotateCcw size={15} aria-hidden /> Reabrir
+          </Botao>
+        ) : (
+          <Botao type="button" onClick={() => agir(() => concluirManifestacao(m.id, usuarioAtual()?.email ?? 'Equipe'))} disabled={busy}>
+            <CheckCheck size={15} aria-hidden /> Marcar como concluída
+          </Botao>
         )}
       </div>
     </Cartao>

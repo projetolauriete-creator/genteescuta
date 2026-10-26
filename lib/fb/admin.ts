@@ -184,21 +184,68 @@ export async function responderPeloPortal(id: string, mensagem: string, autor: s
   const atual = snap.data() as any
   if (atual.anonima || !atual.autor_uid) throw new Error('Manifestação anônima: não há para quem responder.')
   const agora = new Date().toISOString()
+  // Ao responder, o status vira "Respondida" (sem rebaixar uma já "Concluída").
+  const novoStatus = atual.status === 'concluida' ? 'concluida' : 'respondida'
   const updates = Array.isArray(atual.updates) ? [...atual.updates] : []
   updates.push({
     tipo: 'resposta',
+    status_anterior: atual.status ?? null,
+    status_novo: novoStatus,
     mensagem: texto,
     autor,
     visivel_ao_colaborador: true, // aparece no portal, em "Minhas manifestações"
     criado_em: agora,
   })
   await updateDoc(ref, {
+    status: novoStatus,
+    respondida_em: atual.respondida_em ?? agora,
     analise: 'analisada',
     analise_por: autor,
     analise_em: atual.analise_em ?? agora,
     atualizado_em: agora,
     updates,
   })
+  return { ok: true }
+}
+
+/** Marca a manifestação como Concluída (encerra o assunto). Registra no histórico. */
+export async function concluirManifestacao(id: string, autor: string) {
+  const ref = doc(db(), 'manifestacoes', id)
+  const snap = await getDoc(ref)
+  if (!snap.exists()) throw new Error('Manifestação não encontrada.')
+  const atual = snap.data() as any
+  const agora = new Date().toISOString()
+  const updates = Array.isArray(atual.updates) ? [...atual.updates] : []
+  updates.push({
+    status_anterior: atual.status ?? null,
+    status_novo: 'concluida',
+    mensagem: 'Assunto concluído.',
+    autor,
+    visivel_ao_colaborador: true,
+    criado_em: agora,
+  })
+  await updateDoc(ref, { status: 'concluida', concluida_em: agora, atualizado_em: agora, updates })
+  return { ok: true }
+}
+
+/** Reabre uma manifestação concluída (volta para Respondida ou Recebida). */
+export async function reabrirManifestacao(id: string, autor: string) {
+  const ref = doc(db(), 'manifestacoes', id)
+  const snap = await getDoc(ref)
+  if (!snap.exists()) throw new Error('Manifestação não encontrada.')
+  const atual = snap.data() as any
+  const destino = atual.respondida_em ? 'respondida' : 'recebida'
+  const agora = new Date().toISOString()
+  const updates = Array.isArray(atual.updates) ? [...atual.updates] : []
+  updates.push({
+    status_anterior: atual.status ?? null,
+    status_novo: destino,
+    mensagem: 'Assunto reaberto.',
+    autor,
+    visivel_ao_colaborador: true,
+    criado_em: agora,
+  })
+  await updateDoc(ref, { status: destino, concluida_em: null, atualizado_em: agora, updates })
   return { ok: true }
 }
 

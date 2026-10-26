@@ -20,12 +20,17 @@ export type ManifestacaoTipo =
 
 export type ManifestacaoStatus =
   | 'recebida'
+  | 'respondida'
+  | 'concluida'
   | 'em_analise'
   | 'analisada'
   | 'em_implementacao'
   | 'implementada'
   | 'nao_aplicavel'
   | 'arquivada'
+
+/** Fluxo principal da moderação (andamento da resposta). */
+export const STATUS_FLUXO: ManifestacaoStatus[] = ['recebida', 'respondida', 'concluida']
 
 export type Prioridade = 'baixa' | 'media' | 'alta'
 export type FaixaRisco = 'baixo' | 'moderado' | 'alto' | 'critico'
@@ -239,6 +244,8 @@ export const TIPO_MANIFESTACAO_DESC: Record<ManifestacaoTipo, string> = {
 
 export const STATUS_MANIFESTACAO_LABEL: Record<ManifestacaoStatus, string> = {
   recebida: 'Recebida',
+  respondida: 'Respondida',
+  concluida: 'Concluída',
   em_analise: 'Em análise',
   analisada: 'Analisada',
   em_implementacao: 'Em implementação',

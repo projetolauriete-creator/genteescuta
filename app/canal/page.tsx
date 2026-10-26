@@ -12,9 +12,10 @@ import {
 import { configurado } from '@/lib/firebase'
 import { getConfig, listarMinhasManifestacoes, excluirMinhaManifestacao } from '@/lib/fb/publico'
 import { observarLogin } from '@/lib/fb/auth'
-import { TIPO_MANIFESTACAO_LABEL, STATUS_MANIFESTACAO_LABEL, TRIAGEM_LABEL } from '@/lib/types'
+import { TIPO_MANIFESTACAO_LABEL, TRIAGEM_LABEL } from '@/lib/types'
 import { CabecalhoPublico, RodapePublico } from '@/components/CabecalhoPublico'
 import { TelaConfiguracao } from '@/components/TelaConfiguracao'
+import { StatusChip } from '@/components/StatusManifestacao'
 import { Chip } from '@/components/ui'
 
 function fmtData(iso?: string): string {
@@ -170,7 +171,7 @@ function MinhasManifestacoes() {
                   </div>
                   <p className="mt-1.5 line-clamp-2 text-sm text-tinta">{m.titulo || m.problema || m.descricao || '-'}</p>
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    <Chip faixa="neutro">{STATUS_MANIFESTACAO_LABEL[m.status as keyof typeof STATUS_MANIFESTACAO_LABEL] ?? m.status}</Chip>
+                    <StatusChip status={m.status} />
                     {m.triagem && m.triagem !== 'pendente' && (
                       <Chip faixa={m.triagem === 'aprovada' ? 'baixo' : 'critico'}>{TRIAGEM_LABEL[m.triagem as keyof typeof TRIAGEM_LABEL] ?? m.triagem}</Chip>
                     )}
