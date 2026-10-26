@@ -56,7 +56,12 @@ export default function CanalAdmin() {
 
   async function rodar(id: string, fn: () => Promise<unknown>) {
     setErroAcao(null); setAcaoBusy(id)
-    try { await fn(); await recarregar() }
+    try {
+      await fn()
+      await recarregar()
+      // Avisa o menu para recalcular o badge (não analisadas).
+      window.dispatchEvent(new CustomEvent('manifestacoes:mudou'))
+    }
     catch (e) { setErroAcao(e instanceof Error ? e.message : 'Não consegui concluir a ação.') }
     setAcaoBusy('')
   }

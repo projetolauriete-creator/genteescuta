@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Mail, UserX, MapPin, Calendar, User, Building2, CheckCircle2, XCircle, MessageSquare, CheckCheck, RotateCcw } from 'lucide-react'
-import { getManifestacao, triarManifestacao, responderPeloPortal, concluirManifestacao, reabrirManifestacao } from '@/lib/fb/admin'
+import { getManifestacao, triarManifestacao, responderPeloPortal, concluirManifestacao, reabrirManifestacao, marcarAnalise } from '@/lib/fb/admin'
 import { usuarioAtual } from '@/lib/fb/auth'
 import { CabecalhoPagina, Cartao, Chip, Aviso, Botao } from '@/components/ui'
 import { LinhaDoTempo, StatusChip } from '@/components/StatusManifestacao'
@@ -19,7 +19,19 @@ function Detalhe() {
 
   function recarregar() {
     if (!id) return setEstado('nao')
-    getManifestacao(id).then((d) => { if (d) { setM(d); setEstado('ok') } else setEstado('nao') }).catch(() => setEstado('nao'))
+    getManifestacao(id).then((d) => {
+      if (!d) return setEstado('nao')
+      setM(d); setEstado('ok')
+      // Abrir = visualizar: marca como analisada (sai do badge) uma única vez.
+      if ((d.analise ?? 'nao_analisada') !== 'analisada') {
+        marcarAnalise(id, true, usuarioAtual()?.email ?? 'Equipe')
+          .then(() => {
+            setM((prev: any) => (prev ? { ...prev, analise: 'analisada' } : prev))
+            window.dispatchEvent(new CustomEvent('manifestacoes:mudou'))
+          })
+          .catch(() => {})
+      }
+    }).catch(() => setEstado('nao'))
   }
   useEffect(recarregar, [id])
 

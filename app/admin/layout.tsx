@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useCallback, useEffect, useState } from 'react'
+import { useRouter, usePathname } from 'next/navigation'
 import Link from '@/components/LinkSemPrefetch'
 import { LogOut, ExternalLink, Menu, X } from 'lucide-react'
 import { configurado } from '@/lib/firebase'
@@ -13,13 +13,23 @@ import { PERFIL_POR_ID } from '@/lib/permissoes'
 import { TelaConfiguracao } from '@/components/TelaConfiguracao'
 import { NavAdmin } from '@/components/NavAdmin'
 
+// Badge do menu = manifestações ainda NÃO analisadas (não vistas).
+function contarNaoVistas(ms: any[]): number {
+  return ms.filter((m) => (m.analise ?? 'nao_analisada') !== 'analisada').length
+}
+
 export default function LayoutAdmin({ children }: { children: React.ReactNode }) {
   const router = useRouter()
+  const caminho = usePathname()
   const [user, setUser] = useState<User | null | undefined>(undefined)
   const [conta, setConta] = useState<Conta | null | undefined>(undefined)
   const [empresa, setEmpresa] = useState('Soulan Recursos Humanos')
   const [pendentes, setPendentes] = useState(0)
   const [menuAberto, setMenuAberto] = useState(false)
+
+  const atualizarPendentes = useCallback(() => {
+    listarManifestacoes().then((ms) => setPendentes(contarNaoVistas(ms))).catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (!configurado()) return
@@ -32,14 +42,25 @@ export default function LayoutAdmin({ children }: { children: React.ReactNode })
       getConfig().then((c) => setEmpresa(c.empresa_nome)).catch(() => {})
       const c = await minhaConta().catch(() => null)
       setConta(c)
-      if (c && c.ativo) {
-        listarManifestacoes()
-          .then((ms) => setPendentes(ms.filter((m: any) => m.status === 'recebida' || m.status === 'em_analise').length))
-          .catch(() => {})
-      }
+      if (c && c.ativo) atualizarPendentes()
     })
     return cancelar
-  }, [router])
+  }, [router, atualizarPendentes])
+
+  // Atualiza o badge sozinho: ao navegar, ao voltar o foco, e quando a moderação
+  // avisa que algo mudou (manifestação vista/respondida/concluída).
+  useEffect(() => {
+    if (!conta || !conta.ativo) return
+    atualizarPendentes()
+    const aoFocar = () => atualizarPendentes()
+    const aoMudar = () => atualizarPendentes()
+    window.addEventListener('focus', aoFocar)
+    window.addEventListener('manifestacoes:mudou', aoMudar)
+    return () => {
+      window.removeEventListener('focus', aoFocar)
+      window.removeEventListener('manifestacoes:mudou', aoMudar)
+    }
+  }, [caminho, conta, atualizarPendentes])
 
   if (!configurado()) return <TelaConfiguracao />
 
