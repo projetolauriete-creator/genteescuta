@@ -11,7 +11,7 @@ export default function AdminTrilhaDesenvolvimento() {
         descricao="Crie trilhas gamificadas com atividades e pontos. As mudanças aparecem para os colaboradores na hora."
         voltar={{ href: '/trilhas', rotulo: 'Ver trilhas (colaborador)' }}
       />
-      <div className="max-w-4xl space-y-4 p-4 sm:p-6">
+      <div className="space-y-4 p-4 sm:p-6">
         <GestaoTrilhasDev />
       </div>
     </>

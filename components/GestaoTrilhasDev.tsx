@@ -5,8 +5,8 @@
 // dentro de cada trilha, CRUD de atividades com editor por tipo.
 // =============================================================
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, Trash2, Save, Loader2, ChevronUp, ChevronDown, Pencil, Eye, EyeOff, X, ListChecks, Image as ImageIcon, Star, Upload, Sparkles, FileText } from 'lucide-react'
-import { Cartao, Campo, ENTRADA, Botao, Aviso, Chip } from '@/components/ui'
+import { Plus, Trash2, Save, Loader2, ChevronUp, ChevronDown, Pencil, Eye, EyeOff, X, ListChecks, Image as ImageIcon, Star, Upload, Sparkles, FileText, ExternalLink, LayoutGrid } from 'lucide-react'
+import { Campo, ENTRADA, Botao, Aviso, Chip } from '@/components/ui'
 import { comprimirImagem } from '@/lib/imagem'
 import { lerDocumentoDataURL } from '@/lib/arquivo'
 import { gerarCaca, DIRECAO_LABEL, type DirecaoCaca } from '@/lib/caca'
@@ -20,18 +20,23 @@ import {
 
 export function GestaoTrilhasDev() {
   const [itens, setItens] = useState<TrilhaDev[] | null>(null)
+  const [persistidos, setPersistidos] = useState<Set<string>>(new Set())
   const [editId, setEditId] = useState<string | null>(null)
   const [draft, setDraft] = useState<TrilhaDev | null>(null)
-  const [abertaId, setAbertaId] = useState<string | null>(null)
   const [pendente, setPendente] = useState(false)
   const [aviso, setAviso] = useState<string | null>(null)
   const [erro, setErro] = useState<string | null>(null)
 
-  async function carregar() { setItens(await listarTrilhasDev().catch(() => [])) }
+  async function carregar() {
+    const lista = await listarTrilhasDev().catch(() => [])
+    setItens(lista)
+    setPersistidos(new Set(lista.map((t) => t.id)))
+    return lista
+  }
   useEffect(() => { carregar() }, [])
 
-  function abrir(t: TrilhaDev) { setErro(null); setAviso(null); setEditId(t.id); setDraft({ ...t }) }
-  function fechar() { setEditId(null); setDraft(null) }
+  function selecionar(t: TrilhaDev) { setErro(null); setAviso(null); setEditId(t.id); setDraft({ ...t }) }
+  function limparSelecao() { setEditId(null); setDraft(null) }
   function patch(p: Partial<TrilhaDev>) { setDraft((d) => (d ? { ...d, ...p } : d)) }
 
   async function salvar() {
@@ -39,8 +44,11 @@ export function GestaoTrilhasDev() {
     if (!draft.titulo.trim()) { setErro('Dê um título à trilha.'); return }
     setPendente(true); setErro(null); setAviso(null)
     try {
-      await salvarTrilhaDev({ ...draft, titulo: draft.titulo.trim() })
-      setAviso('Trilha salva.'); fechar(); await carregar()
+      const limpo = { ...draft, titulo: draft.titulo.trim() }
+      await salvarTrilhaDev(limpo)
+      setAviso('Trilha salva.')
+      setDraft(limpo)
+      await carregar() // a trilha segue selecionada (agora persistida)
     } catch (e) { setErro(e instanceof Error ? e.message : 'Não consegui salvar.') }
     setPendente(false)
   }
@@ -48,7 +56,7 @@ export function GestaoTrilhasDev() {
   function adicionar() {
     const ordem = (itens && itens.length ? Math.max(...itens.map((i) => i.ordem)) : 0) + 1
     const nova = trilhaDevVazia(ordem)
-    setItens([...(itens ?? []), nova]); abrir(nova)
+    setItens([...(itens ?? []), nova]); selecionar(nova)
   }
 
   async function mover(t: TrilhaDev, dir: 'up' | 'down') {
@@ -59,7 +67,19 @@ export function GestaoTrilhasDev() {
     await Promise.all([salvarTrilhaDev({ ...a, ordem: b.ordem }), salvarTrilhaDev({ ...b, ordem: a.ordem })]).catch(() => {})
     await carregar()
   }
-  async function alternarAtiva(t: TrilhaDev) { await salvarTrilhaDev({ ...t, ativa: !t.ativa }).catch(() => {}); await carregar() }
+
+  // Ativar/desativar na hora: persiste já (igual ao comportamento antigo), e
+  // leva junto as edições em aberto quando a trilha já tem título.
+  async function toggleAtiva() {
+    if (!draft) return
+    const novo = { ...draft, ativa: !draft.ativa }
+    setDraft(novo)
+    if (novo.titulo.trim()) {
+      setErro(null)
+      try { await salvarTrilhaDev(novo); await carregar() }
+      catch (e) { setErro(e instanceof Error ? e.message : 'Não consegui atualizar o status.') }
+    }
+  }
 
   async function semear() {
     if (!confirm('Criar (ou atualizar) a trilha de exemplo "Integração (Onboarding)" com as casas 1 a 4? Ela entra desativada, para você revisar antes de publicar.')) return
@@ -71,74 +91,150 @@ export function GestaoTrilhasDev() {
   async function remover(t: TrilhaDev) {
     if (!confirm(`Remover a trilha "${t.titulo || 'sem título'}" e todas as suas atividades?`)) return
     await excluirTrilhaDev(t.id).catch(() => {})
-    if (editId === t.id) fechar(); if (abertaId === t.id) setAbertaId(null)
+    if (editId === t.id) limparSelecao()
     await carregar()
   }
 
+  const novaSelecionada = !!editId && !persistidos.has(editId)
+
   return (
-    <Cartao titulo="Trilhas" apoio="Crie as trilhas, defina os pontos e gerencie as atividades de cada uma.">
-      {aviso && <div className="mb-3"><Aviso tom="sucesso">{aviso}</Aviso></div>}
-      {erro && <div className="mb-3"><Aviso tom="erro">{erro}</Aviso></div>}
+    <div className="space-y-3">
+      {aviso && <Aviso tom="sucesso">{aviso}</Aviso>}
+      {erro && <Aviso tom="erro">{erro}</Aviso>}
 
-      {itens === null ? (
-        <p className="text-sm text-tinta-3">Carregando…</p>
-      ) : (
-        <div className="space-y-2">
-          {itens.map((t, i) => (
-            <div key={t.id} className="rounded-lg border border-borda bg-white">
-              <div className="flex flex-wrap items-center gap-2 px-3 py-2.5">
-                <span className="flex h-9 w-14 flex-none items-center justify-center overflow-hidden rounded-md bg-superficie-2">
-                  {t.capa ? <img src={t.capa} alt="" className="h-full w-full object-cover" /> : <ImageIcon size={16} className="text-tinta-3" aria-hidden />}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-tinta">{t.titulo || '(sem título)'}</span>
-                <Chip faixa="marca"><Star size={11} className="fill-current" aria-hidden /> {t.pontos} pts</Chip>
-                <Chip faixa={t.ativa ? 'baixo' : 'neutro'}>{t.ativa ? 'Ativa' : 'Inativa'}</Chip>
-                <div className="flex items-center gap-0.5">
-                  <BtnIcone title="Subir" onClick={() => mover(t, 'up')} disabled={i === 0}><ChevronUp size={16} /></BtnIcone>
-                  <BtnIcone title="Descer" onClick={() => mover(t, 'down')} disabled={i === itens.length - 1}><ChevronDown size={16} /></BtnIcone>
-                  <BtnIcone title={t.ativa ? 'Desativar' : 'Ativar'} onClick={() => alternarAtiva(t)}>{t.ativa ? <EyeOff size={15} /> : <Eye size={15} />}</BtnIcone>
-                  <BtnIcone title="Editar" onClick={() => (editId === t.id ? fechar() : abrir(t))}><Pencil size={15} /></BtnIcone>
-                  <BtnIcone title="Remover" perigo onClick={() => remover(t)}><Trash2 size={15} /></BtnIcone>
-                </div>
+      <div className="grid gap-4 lg:grid-cols-[22rem_1fr] xl:grid-cols-[24rem_1fr]">
+        {/* ----------------- Coluna esquerda: lista de trilhas ----------------- */}
+        <aside className="lg:sticky lg:top-4 lg:self-start">
+          <div className="cartao">
+            <header className="flex items-center justify-between gap-3 border-b border-borda px-4 py-3">
+              <div>
+                <h2 className="cartao-titulo">Trilhas</h2>
+                <p className="mt-0.5 text-xs text-tinta-3">{itens === null ? 'Carregando…' : `${itens.length} ${itens.length === 1 ? 'trilha' : 'trilhas'}`}</p>
               </div>
+            </header>
+            <div className="space-y-2.5 p-3">
+              <button type="button" onClick={adicionar} className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-borda-forte px-3 py-2.5 text-sm font-semibold text-tinta-2 transition-colors hover:border-marca hover:bg-marca-clara hover:text-marca-texto">
+                <Plus size={16} aria-hidden /> Adicionar trilha
+              </button>
 
-              {editId === t.id && draft && (
-                <div className="space-y-3 border-t border-borda px-3 py-3">
-                  <Campo rotulo="Título"><input value={draft.titulo} onChange={(e) => patch({ titulo: e.target.value })} className={ENTRADA} placeholder="Ex.: Boas-vindas à Soulan" /></Campo>
-                  <Campo rotulo="Descrição"><textarea value={draft.descricao} onChange={(e) => patch({ descricao: e.target.value })} rows={2} className={ENTRADA} /></Campo>
-                  <div className="grid gap-3 sm:grid-cols-[1fr_8rem]">
-                    <ImagemCampo rotulo="Capa da trilha" valor={draft.capa} onChange={(v) => patch({ capa: v })} />
-                    <Campo rotulo="Pontos ao concluir"><input type="number" min={0} value={draft.pontos} onChange={(e) => patch({ pontos: Math.max(0, Math.round(Number(e.target.value) || 0)) })} className={ENTRADA} /></Campo>
-                  </div>
-                  <label className="flex items-center gap-2.5 text-sm text-tinta"><input type="checkbox" checked={draft.ativa} onChange={(e) => patch({ ativa: e.target.checked })} className="h-4 w-4 accent-[var(--color-marca)]" /> Ativa (visível para os colaboradores)</label>
-                  <div className="flex items-center gap-2">
-                    <Botao type="button" onClick={salvar} disabled={pendente}>{pendente ? <><Loader2 size={15} className="animate-spin" aria-hidden /> Salvando…</> : <><Save size={15} aria-hidden /> Salvar trilha</>}</Botao>
-                    <button type="button" onClick={fechar} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-tinta-2 hover:bg-superficie-2"><X size={15} aria-hidden /> Cancelar</button>
-                  </div>
-                </div>
+              {itens === null ? (
+                <p className="px-1 py-2 text-sm text-tinta-3">Carregando…</p>
+              ) : itens.length === 0 ? (
+                <p className="px-1 py-6 text-center text-sm text-tinta-3">Nenhuma trilha ainda. Crie a primeira ou semeie o exemplo.</p>
+              ) : (
+                itens.map((t, i) => {
+                  const sel = editId === t.id
+                  return (
+                    <div key={t.id} className={`flex items-center gap-1.5 rounded-xl border p-2 transition-colors ${sel ? 'border-marca bg-marca-clara ring-1 ring-marca' : 'border-borda bg-white hover:border-borda-forte'}`}>
+                      <button type="button" onClick={() => selecionar(t)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+                        <span className="flex h-11 w-16 flex-none items-center justify-center overflow-hidden rounded-lg bg-superficie-2">
+                          {t.capa ? <img src={t.capa} alt="" className="h-full w-full object-cover" /> : <ImageIcon size={16} className="text-tinta-3" aria-hidden />}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-semibold text-tinta">{t.titulo || '(sem título)'}</span>
+                          <span className="mt-1 flex flex-wrap items-center gap-1.5">
+                            <Chip faixa="marca"><Star size={11} className="fill-current" aria-hidden /> {t.pontos} pts</Chip>
+                            <Chip faixa={t.ativa ? 'baixo' : 'neutro'}>{t.ativa ? 'Ativa' : 'Inativa'}</Chip>
+                          </span>
+                        </span>
+                      </button>
+                      <div className="flex flex-none flex-col">
+                        <BtnIcone title="Subir" onClick={() => mover(t, 'up')} disabled={i === 0}><ChevronUp size={15} /></BtnIcone>
+                        <BtnIcone title="Descer" onClick={() => mover(t, 'down')} disabled={i === itens.length - 1}><ChevronDown size={15} /></BtnIcone>
+                      </div>
+                    </div>
+                  )
+                })
               )}
 
-              {/* Atividades da trilha */}
-              <div className="border-t border-borda px-3 py-2">
-                <button type="button" onClick={() => setAbertaId(abertaId === t.id ? null : t.id)} className="inline-flex items-center gap-1.5 text-sm font-medium text-marca-texto hover:underline">
-                  <ListChecks size={15} aria-hidden /> {abertaId === t.id ? 'Fechar atividades' : 'Gerenciar atividades'}
-                </button>
-                {abertaId === t.id && <div className="mt-2"><EditorAtividades trilhaId={t.id} /></div>}
+              <button type="button" onClick={semear} disabled={pendente} className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-borda-forte bg-white px-3 py-2 text-xs font-medium text-tinta-2 transition-colors hover:border-marca hover:text-marca-texto disabled:opacity-60">
+                <Sparkles size={14} aria-hidden /> Semear Onboarding (exemplo)
+              </button>
+            </div>
+          </div>
+        </aside>
+
+        {/* ----------------- Coluna direita: canvas de edição ----------------- */}
+        <section className="min-w-0">
+          {!draft ? (
+            <div className="flex min-h-[20rem] flex-col items-center justify-center rounded-2xl border border-dashed border-borda-forte bg-white/60 px-6 py-16 text-center">
+              <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-marca-clara text-marca">
+                <LayoutGrid size={26} aria-hidden />
+              </span>
+              <p className="mt-4 text-[0.9375rem] font-semibold text-tinta">Selecione uma trilha para editar</p>
+              <p className="mt-1.5 max-w-sm text-sm text-tinta-3">Escolha uma trilha na lista ao lado ou crie uma nova para montar os módulos e atividades aqui.</p>
+            </div>
+          ) : (
+            <div className="cartao overflow-hidden">
+              {/* Cabeçalho do canvas: título, status, ações */}
+              <div className="space-y-4 border-b border-borda p-4 sm:p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <label className="mb-1 block text-[0.6875rem] font-semibold uppercase tracking-[0.04em] text-tinta-3">Título da trilha</label>
+                    <input
+                      value={draft.titulo}
+                      onChange={(e) => patch({ titulo: e.target.value })}
+                      className="w-full rounded-lg border border-transparent bg-transparent px-1 py-1 text-[1.375rem] font-semibold tracking-[-0.014em] text-tinta transition-colors placeholder:text-tinta-3 hover:border-borda focus:border-marca focus:bg-white focus:outline-none"
+                      placeholder="Ex.: Boas-vindas à Soulan"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={toggleAtiva}
+                    title={draft.ativa ? 'Clique para desativar' : 'Clique para ativar'}
+                    className={`inline-flex flex-none items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition-colors ${draft.ativa ? 'border-[#cfe6b8] bg-[#f4faec] text-verde-escuro hover:bg-[#edf6df]' : 'border-borda-forte bg-white text-tinta-2 hover:border-marca hover:text-marca-texto'}`}
+                  >
+                    {draft.ativa ? <Eye size={16} aria-hidden /> : <EyeOff size={16} aria-hidden />}
+                    {draft.ativa ? 'Ativa' : 'Inativa'}
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Botao type="button" onClick={salvar} disabled={pendente}>
+                    {pendente ? <><Loader2 size={15} className="animate-spin" aria-hidden /> Salvando…</> : <><Save size={15} aria-hidden /> Salvar</>}
+                  </Botao>
+                  <a href="/trilhas" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-borda-forte bg-white px-3 py-2 text-sm font-medium text-tinta-2 transition-colors hover:border-marca hover:text-marca-texto">
+                    <ExternalLink size={15} aria-hidden /> Ver como colaborador
+                  </a>
+                  <div className="ml-auto">
+                    <button type="button" onClick={() => editId && remover({ ...draft, id: editId })} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-tinta-3 transition-colors hover:bg-plano hover:text-critico">
+                      <Trash2 size={15} aria-hidden /> Remover trilha
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Corpo do canvas: dados da trilha + construtor de módulos */}
+              <div className="space-y-5 p-4 sm:p-5">
+                <div className="grid gap-4 sm:grid-cols-[1fr_9rem]">
+                  <Campo rotulo="Descrição"><textarea value={draft.descricao} onChange={(e) => patch({ descricao: e.target.value })} rows={5} className={`${ENTRADA} min-h-[7.5rem] resize-y leading-relaxed`} placeholder="Um resumo curto do que a pessoa vai aprender." /></Campo>
+                  <Campo rotulo="Pontos ao concluir"><input type="number" min={0} value={draft.pontos} onChange={(e) => patch({ pontos: Math.max(0, Math.round(Number(e.target.value) || 0)) })} className={ENTRADA} /></Campo>
+                </div>
+                <ImagemCampo rotulo="Capa da trilha" valor={draft.capa} onChange={(v) => patch({ capa: v })} />
+
+                <div className="border-t border-borda pt-4">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-marca-clara text-marca"><ListChecks size={16} aria-hidden /></span>
+                    <div>
+                      <h3 className="text-[0.9375rem] font-semibold text-tinta">Módulos</h3>
+                      <p className="text-xs text-tinta-3">Monte os módulos (01, 02, 03...) e as atividades de cada um. Arraste pela ordem com as setas.</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3">
+                    {novaSelecionada ? (
+                      <Aviso tom="info">Salve a trilha para começar a adicionar os módulos.</Aviso>
+                    ) : (
+                      <EditorAtividades key={editId!} trilhaId={editId!} />
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
-          ))}
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button type="button" onClick={adicionar} className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-borda-forte px-3 py-2 text-sm font-medium text-tinta-2 transition-colors hover:border-marca hover:text-marca-texto">
-              <Plus size={15} aria-hidden /> Adicionar trilha
-            </button>
-            <button type="button" onClick={semear} disabled={pendente} className="inline-flex items-center gap-1.5 rounded-lg border border-borda-forte bg-white px-3 py-2 text-sm font-medium text-tinta-2 transition-colors hover:border-marca hover:text-marca-texto disabled:opacity-60">
-              <Sparkles size={15} aria-hidden /> Semear Onboarding (exemplo)
-            </button>
-          </div>
-        </div>
-      )}
-    </Cartao>
+          )}
+        </section>
+      </div>
+    </div>
   )
 }
 
@@ -220,11 +316,11 @@ function EditorAtividades({ trilhaId }: { trilhaId: string }) {
   return (
     <div className="space-y-2 rounded-lg bg-superficie-2 p-2.5">
       {erro && <Aviso tom="erro">{erro}</Aviso>}
-      {itens.length === 0 && <p className="px-1 text-xs text-tinta-3">Nenhuma atividade ainda.</p>}
+      {itens.length === 0 && <p className="px-1 text-xs text-tinta-3">Nenhum módulo ainda. Adicione o primeiro abaixo.</p>}
       {itens.map((a, i) => (
         <div key={a.id} className="rounded-lg border border-borda bg-white">
           <div className="flex flex-wrap items-center gap-2 px-3 py-2">
-            <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-marca-clara text-xs font-bold text-marca-texto">{i + 1}</span>
+            <span className="flex h-7 w-7 flex-none items-center justify-center rounded-lg bg-marca-clara text-xs font-bold tabular text-marca-texto">{String(i + 1).padStart(2, '0')}</span>
             <span className="min-w-0 flex-1 truncate text-sm font-medium text-tinta">{a.titulo || '(sem título)'}</span>
             <Chip faixa="neutro">{CHIP_TIPO[a.tipo]}</Chip>
             <div className="flex items-center gap-0.5">
@@ -278,7 +374,7 @@ function EditorAtividades({ trilhaId }: { trilhaId: string }) {
         </div>
       ))}
       <button type="button" onClick={adicionar} className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-borda-forte px-3 py-1.5 text-xs font-medium text-tinta-2 transition-colors hover:border-marca hover:text-marca-texto">
-        <Plus size={14} aria-hidden /> Adicionar atividade
+        <Plus size={14} aria-hidden /> Adicionar módulo
       </button>
     </div>
   )
