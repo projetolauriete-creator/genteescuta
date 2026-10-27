@@ -377,6 +377,17 @@ service cloud.firestore {
       allow create, update, delete: if podeConteudo();
     }
 
+    // -------- Sala de documentos por área (Central de Conhecimento) --------
+    // Cada documento pertence a UMA área (centro de custo). O colaborador lê só
+    // os documentos da PRÓPRIA área; Admin/RH (conteúdo) lê todas e gerencia.
+    // O recorte por área é imposto AQUI: não dá para acessar os documentos de
+    // outra área por URL direta nem pela API (a leitura exige que a área do
+    // documento seja o centro de custo de quem consulta).
+    match /area_documentos/{id} {
+      allow read: if admin() || (logado() && meuCentro() == resource.data.area);
+      allow create, update, delete: if podeConteudo();
+    }
+
     // -------- Trilhas de Desenvolvimento gamificadas (Fase 1) --------
     // Colaborador logado LÊ as trilhas e atividades; só conteúdo (admin/RH) edita.
     match /trilhas_dev/{id} {

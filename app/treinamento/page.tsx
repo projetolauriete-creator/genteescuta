@@ -8,7 +8,8 @@ import { perfilAtual, type Perfil } from '@/lib/fb/funcionarios'
 import { getProgresso, type ProgressoTreino } from '@/lib/fb/treino'
 import { listarTrilhas, getTreinamentoEmBreve } from '@/lib/fb/treinos'
 import { type Trilha } from '@/lib/treinamentos'
-import { GraduationCap, BookOpen, Trophy, Sparkles, Clock } from 'lucide-react'
+import { GraduationCap, BookOpen, Trophy, Sparkles, Clock, FolderOpen, ArrowRight } from 'lucide-react'
+import Link from '@/components/LinkSemPrefetch'
 import { BotaoVoltar } from '@/components/BotaoVoltar'
 import { CabecalhoPublico, RodapePublico } from '@/components/CabecalhoPublico'
 import { TelaConfiguracao } from '@/components/TelaConfiguracao'
@@ -40,6 +41,22 @@ export default function Treinamento() {
     <div className="min-h-screen">
       <CabecalhoPublico empresa={empresa} />
       <main className="mx-auto max-w-5xl px-4 py-8 sm:py-10">
+        {/* Sala de documentos por área: sempre visível (independe do "Em breve"
+            das trilhas). Cada colaborador vê os materiais da própria área. */}
+        <Link
+          href="/treinamento/documentos"
+          className="cartao-g cartao-clicavel group mb-6 flex items-center gap-4 p-5"
+        >
+          <span className="flex h-12 w-12 flex-none items-center justify-center rounded-xl text-white" style={{ background: 'linear-gradient(135deg, #1a4895 0%, #0a2f63 100%)' }}>
+            <FolderOpen size={22} aria-hidden />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[0.9375rem] font-semibold tracking-[-0.012em] text-tinta">Sala de documentos por área</span>
+            <span className="block text-[0.8125rem] leading-[1.5] text-tinta-3">Materiais, planilhas, PDFs e vídeos disponíveis para a sua área.</span>
+          </span>
+          <ArrowRight size={18} className="flex-none text-tinta-3 transition-transform group-hover:translate-x-0.5" aria-hidden />
+        </Link>
+
         {emBreve === null ? (
           <p className="text-sm text-tinta-3">Carregando…</p>
         ) : emBreve ? (

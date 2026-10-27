@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, Save, Loader2, X, Eye, EyeOff } from 'lucide-react'
+import Link from '@/components/LinkSemPrefetch'
+import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, Save, Loader2, X, Eye, EyeOff, FolderOpen } from 'lucide-react'
 import {
   listarTrilhas, criarTrilha, atualizarTrilha, excluirTrilha, trocarOrdemTrilhas,
   getTreinamentoEmBreve, setTreinamentoEmBreve,
@@ -67,6 +68,18 @@ export default function AdminTreinamento() {
       <div className="max-w-4xl space-y-4 p-4 sm:p-6">
         {aviso && <Aviso tom="sucesso">{aviso}</Aviso>}
         {erro && <Aviso tom="erro">{erro}</Aviso>}
+
+        {/* Atalho para a Sala de documentos por área. */}
+        <Link href="/admin/treinamento/documentos" className="flex items-center gap-3 rounded-xl border border-borda bg-white p-4 transition-colors hover:border-marca">
+          <span className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-marca-clara text-marca">
+            <FolderOpen size={18} aria-hidden />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold text-tinta">Sala de documentos por área</span>
+            <span className="block text-xs text-tinta-2">Adicione materiais (PDF, link, planilha, vídeo) que cada área vê. Visível só para a própria área.</span>
+          </span>
+          <span className="flex-none text-sm font-semibold text-marca-texto">Gerir →</span>
+        </Link>
 
         {/* Interruptor "Em breve": controla o que os colaboradores veem. */}
         <div className={`flex flex-wrap items-center gap-3 rounded-xl border p-4 ${emBreve ? 'border-[#f2dfae] bg-[#fdf7e7]' : 'border-[#cfe6b8] bg-[#f4faec]'}`}>
