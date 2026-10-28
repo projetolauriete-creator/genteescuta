@@ -13,7 +13,7 @@ import * as XLSX from 'xlsx'
 import { CENTROS_CUSTO, TODOS_CENTROS } from './reembolso'
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
-const PAPEIS_VALIDOS = ['master', 'gestor', 'financeiro', 'colaborador']
+const PAPEIS_VALIDOS = ['master', 'gestor', 'financeiro', 'gente_cultura', 'colaborador']
 
 export interface LinhaImport {
   linha: number

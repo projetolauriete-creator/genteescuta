@@ -8,6 +8,7 @@ import {
   ArrowRight,
   Trash2,
   Inbox,
+  ShieldCheck,
 } from 'lucide-react'
 import { configurado } from '@/lib/firebase'
 import { getConfig, listarMinhasManifestacoes, excluirMinhaManifestacao } from '@/lib/fb/publico'
@@ -89,6 +90,29 @@ export default function Canal() {
             </Link>
           ))}
         </div>
+
+        {/* Protocolo de Assédio: canal reservado, à parte dos dois caminhos
+            acima. Visual mais sóbrio, por ser um tema sensível. */}
+        <Link
+          href="/canal/assedio"
+          className="cartao-g cartao-clicavel group mt-3.5 flex items-center gap-4 p-5"
+        >
+          <span
+            className="flex h-11 w-11 flex-none items-center justify-center rounded-xl text-white shadow-[0_2px_6px_rgba(26,23,20,0.14)]"
+            style={{ background: 'linear-gradient(135deg, #1a4895 0%, #002443 100%)' }}
+          >
+            <ShieldCheck size={20} strokeWidth={2} aria-hidden />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[0.9375rem] font-semibold tracking-[-0.014em] text-tinta">
+              Protocolo de Prevenção e Enfrentamento ao Assédio e às Condutas Inadequadas
+            </span>
+            <span className="mt-0.5 block text-[0.8125rem] leading-[1.5] text-tinta-3">
+              Entenda o fluxo de acolhimento e registre um relato em um canal reservado da equipe de Gente e Cultura.
+            </span>
+          </span>
+          <ArrowRight size={18} className="flex-none text-tinta-3 transition-transform group-hover:translate-x-0.5" aria-hidden />
+        </Link>
 
         <MinhasManifestacoes />
       </main>

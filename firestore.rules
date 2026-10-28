@@ -98,6 +98,12 @@ service cloud.firestore {
     function ehMaster() {
       return admin() || temPapel('master');
     }
+    // Gente e Cultura (Protocolo de Assédio): a conta semente OU quem tem o papel
+    // dedicado 'gente_cultura'. É mais restrito que admin: a Diretoria e os demais
+    // Masters NÃO entram aqui a menos que recebam o papel. Lê e trata os relatos.
+    function ehGenteCultura() {
+      return logado() && ( seed() || temPapel('gente_cultura') );
+    }
 
     // -------- Configuração da empresa: pública para ler.
     // Só SUPER edita configurações; a classificação de humor (config/humor)
@@ -108,6 +114,7 @@ service cloud.firestore {
       // (e Master) edita os conteúdos do site (Contato, Sobre, Missão/Visão/Valores).
       allow write: if souSuper()
         || (doc == 'humor' && admin())
+        || (doc == 'assedio' && ehGenteCultura())
         || ((doc == 'contato' || doc == 'sobre' || doc == 'missao' || doc == 'treinamento' || doc == 'carrossel') && podeConteudo());
     }
 
@@ -198,6 +205,29 @@ service cloud.firestore {
       allow update: if podeConteudo();
       allow delete: if podeConteudo()
         || (request.auth != null && resource.data.get('autor_uid', null) == request.auth.uid);
+    }
+
+    // -------- Relatos do Protocolo de Assédio (canal RESTRITO) --------
+    // Coleção separada das manifestações comuns: um relato de assédio NUNCA
+    // entra na lista normal do Canal. Qualquer pessoa ENVIA (anônimo guarda
+    // autor_uid = null; identificado = quem enviou). A leitura e o tratamento
+    // ficam travados AQUI só para Gente e Cultura (papel 'gente_cultura' ou a
+    // conta semente): nem gestor, nem colaborador, nem a Diretoria acessam,
+    // nem por URL direta nem pela API. O próprio autor também não relê (por
+    // isso não há leitura por autor_uid: o retorno é feito fora do sistema).
+    match /assedio_relatos/{id} {
+      allow create: if request.resource.data.autor_uid == null
+        || (request.auth != null && request.resource.data.autor_uid == request.auth.uid);
+      allow read, update, delete: if ehGenteCultura();
+    }
+
+    // Anexos do relato (prints, PDF, fotos): um doc por arquivo, ligado ao
+    // relato por relato_id. Qualquer pessoa ENVIA junto com o relato; a
+    // leitura fica travada só para Gente e Cultura, igual ao relato.
+    match /assedio_anexos/{id} {
+      allow create: if request.resource.data.relato_id is string
+        && request.resource.data.relato_id.size() > 0;
+      allow read, update, delete: if ehGenteCultura();
     }
 
     // -------- Humor da equipe (clima) — CSV importado pelo admin.

@@ -29,7 +29,8 @@ const PAPEIS_COM_MENU = ['master']
 
 // Papéis que um FUNCIONÁRIO pode acumular (colaborador é sempre incluído).
 // "master" = Master Administrador (acesso completo, mesmo poder do e-mail semente).
-const PAPEIS_FUNC = ['master', 'gestor', 'financeiro'] as const
+// "gente_cultura" = acesso ao canal restrito do Protocolo de Assédio (só isso).
+const PAPEIS_FUNC = ['master', 'gestor', 'financeiro', 'gente_cultura'] as const
 
 function pad2(n: number) { return String(n).padStart(2, '0') }
 

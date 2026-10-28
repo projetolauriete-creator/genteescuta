@@ -132,7 +132,7 @@ const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
 
 export type PerfilTipo = 'admin' | 'funcionario' | 'nenhum'
 
-const PAPEIS_VALIDOS = ['master', 'gestor', 'financeiro', 'colaborador'] as const
+const PAPEIS_VALIDOS = ['master', 'gestor', 'financeiro', 'gente_cultura', 'colaborador'] as const
 
 /**
  * Normaliza o array de papéis vindo do banco (aceita só valores conhecidos).
