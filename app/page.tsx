@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from 'react'
 import Link from '@/components/LinkSemPrefetch'
-import { ArrowRight, LifeBuoy, GraduationCap, Receipt, ClipboardList, Cake, MessageSquarePlus, Clock } from 'lucide-react'
+import { ArrowRight, LifeBuoy, GraduationCap, ClipboardList, Cake, MessageSquarePlus, Clock } from 'lucide-react'
 import { configurado } from '@/lib/firebase'
 import { getConfig } from '@/lib/fb/publico'
 import { CabecalhoPublico, RodapePublico } from '@/components/CabecalhoPublico'
 import { Carrossel } from '@/components/Carrossel'
+import { CardReembolsoHome } from '@/components/CardReembolsoHome'
 import { TelaConfiguracao } from '@/components/TelaConfiguracao'
 
 type CardHome = { href: string; titulo: string; frase: string; Icone: typeof LifeBuoy; cor: string; destaque?: boolean; emBreve?: boolean }
@@ -19,7 +20,6 @@ const CARDS: CardHome[] = [
   { href: '/informacoes-administrativas', titulo: 'Informações Administrativas', frase: 'Aqui você encontra acessos e informações importantes para facilitar sua rotina, consultar documentos, e acompanhar os principais processos administrativos da Soulan.', Icone: ClipboardList, cor: 'linear-gradient(135deg, #3f8fcf 0%, #1a4895 100%)' },
   { href: '/contato', titulo: 'Contato e Suporte', frase: 'Fale com a equipe de Gente & Cultura.', Icone: LifeBuoy, cor: 'linear-gradient(135deg, #1f5f9a 0%, #002443 100%)' },
   { href: '/treinamento', titulo: 'Central de Conhecimento', frase: 'Acesse os materiais da sua área disponíveis, além das trilhas de desenvolvimento, treinamentos e conteúdos institucionais da Soulan.', Icone: GraduationCap, cor: 'linear-gradient(135deg, #1a4895 0%, #0a2f63 100%)', emBreve: true },
-  { href: '/reembolso', titulo: 'Solicitação de Reembolso', frase: 'Peça reembolsos, anexe o comprovante e acompanhe a aprovação.', Icone: Receipt, cor: 'linear-gradient(135deg, #ff8864 0%, #d2451c 100%)', destaque: true },
 ]
 
 export default function Inicio() {
@@ -54,6 +54,8 @@ export default function Inicio() {
         <section className="mb-14">
           <h2 className="titulo-secao text-tinta">Explore o Gente Cultura</h2>
           <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {/* Reembolso: primeiro card, "vivo" conforme o papel de quem logou. */}
+            <CardReembolsoHome />
             {CARDS.map(({ href, titulo, frase, Icone, cor, destaque, emBreve }) => {
               const classe = `group flex flex-col items-center gap-3 rounded-2xl p-5 text-center text-white sm:p-6 [text-shadow:0_1px_6px_rgba(0,0,0,0.22)] ${
                 emBreve
