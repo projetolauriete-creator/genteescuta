@@ -408,11 +408,16 @@ service cloud.firestore {
     }
 
     // -------- Sala de documentos por área (Central de Conhecimento) --------
-    // Cada documento pertence a UMA área (centro de custo). O colaborador lê só
-    // os documentos da PRÓPRIA área; Admin/RH (conteúdo) lê todas e gerencia.
-    // O recorte por área é imposto AQUI: não dá para acessar os documentos de
-    // outra área por URL direta nem pela API (a leitura exige que a área do
-    // documento seja o centro de custo de quem consulta).
+    // Hierarquia: Área (centro de custo) > Módulo (tema) > Documento. Tanto o
+    // módulo quanto o documento guardam o campo `area`. O colaborador lê só os
+    // da PRÓPRIA área; Admin/RH (conteúdo) lê todas e gerencia. O recorte por
+    // área é imposto AQUI: não dá para acessar os de outra área por URL direta
+    // nem pela API (a leitura exige que a área bata com o centro de custo de
+    // quem consulta).
+    match /area_modulos/{id} {
+      allow read: if admin() || (logado() && meuCentro() == resource.data.area);
+      allow create, update, delete: if podeConteudo();
+    }
     match /area_documentos/{id} {
       allow read: if admin() || (logado() && meuCentro() == resource.data.area);
       allow create, update, delete: if podeConteudo();
