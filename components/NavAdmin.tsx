@@ -23,6 +23,7 @@ import {
   TriangleAlert,
   GalleryHorizontal,
   Rocket,
+  Mail,
 } from 'lucide-react'
 import { podeVer, type Permissoes } from '@/lib/permissoes'
 
@@ -98,6 +99,7 @@ const GRUPOS: Grupo[] = [
     titulo: 'Sistema',
     abertoPadrao: false,
     itens: [
+      { href: '/admin/email', rotulo: 'Disparo de e-mail', Icone: Mail, super: true, tela: 'email' },
       { href: '/admin/configuracoes', rotulo: 'Configurações', Icone: Settings, super: true, tela: 'configuracoes' },
     ],
   },

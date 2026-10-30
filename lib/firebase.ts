@@ -9,6 +9,7 @@ import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app'
 import { getFirestore, type Firestore } from 'firebase/firestore'
 import { getAuth, type Auth } from 'firebase/auth'
 import { getStorage, type FirebaseStorage } from 'firebase/storage'
+import { getFunctions, type Functions } from 'firebase/functions'
 
 const config = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -30,6 +31,7 @@ let app: FirebaseApp | undefined
 let _db: Firestore | undefined
 let _auth: Auth | undefined
 let _storage: FirebaseStorage | undefined
+let _funcoes: Functions | undefined
 
 function appFirebase(): FirebaseApp {
   if (!app) app = getApps().length ? getApp() : initializeApp(config as Record<string, string>)
@@ -50,4 +52,11 @@ export function auth(): Auth {
 export function storage(): FirebaseStorage {
   if (!_storage) _storage = getStorage(appFirebase())
   return _storage
+}
+
+/** Cloud Functions (mesma região das functions: southamerica-east1).
+ *  Usado pelo painel de e-mail para chamar a função de teste de envio. */
+export function funcoes(): Functions {
+  if (!_funcoes) _funcoes = getFunctions(appFirebase(), 'southamerica-east1')
+  return _funcoes
 }
