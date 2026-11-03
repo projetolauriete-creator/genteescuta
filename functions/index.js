@@ -11,13 +11,18 @@
 // e envia. O recorte de quem recebe é o mesmo do sino.
 //
 // Função de teste (só admin logado): testeEmail({ para: '...' }).
+//
+// Canal separado: emailDoMural envia por SMTP do Workspace (./smtp.js,
+// secret GMAIL_APP_PASSWORD) quando um aviso do "Gente Informa" é publicado,
+// para todos os colaboradores ativos, em BCC. Não usa o config/email acima.
 // =============================================================
 const { onCall, HttpsError } = require('firebase-functions/v2/https')
-const { onDocumentCreated } = require('firebase-functions/v2/firestore')
+const { onDocumentCreated, onDocumentWritten } = require('firebase-functions/v2/firestore')
 const { setGlobalOptions } = require('firebase-functions/v2')
 const { logger } = require('firebase-functions')
 const admin = require('firebase-admin')
 const { SENDGRID_API_KEY, enviarEmail } = require('./sendgrid')
+const { GMAIL_APP_PASSWORD, enviarMuralBcc } = require('./smtp')
 
 admin.initializeApp()
 const dbA = admin.firestore()
@@ -170,6 +175,146 @@ exports.emailDaNotificacao = onDocumentCreated(
       email_enviados: enviados,
       email_falhas: falhas,
       email_em: new Date().toISOString(),
+    }, { merge: true }).catch(() => {})
+  },
+)
+
+// =============================================================
+// Mural (Gente Informa) -> e-mail para todos os colaboradores ativos.
+//
+// Canal SEPARADO do SendGrid: envia por SMTP do Workspace (ver ./smtp.js),
+// com a senha de app no cofre (GMAIL_APP_PASSWORD). Dispara UMA vez, quando um
+// aviso do "Gente Informa" passa a PUBLICADO (nasce publicado ou um rascunho e
+// publicado). Nunca reenvia: edicao, repost, reacao ou publicacao antiga nao
+// geram novo e-mail. Reconhecimentos (elogios) NAO entram aqui.
+// =============================================================
+
+// Interruptor opcional (config/mural_email.ativo). Sem o doc, fica LIGADO.
+async function muralEmailLigado() {
+  try {
+    const snap = await dbA.doc('config/mural_email').get()
+    if (!snap.exists) return true
+    return snap.data().ativo !== false
+  } catch (e) {
+    logger.error('config/mural_email ilegível', e)
+    return true
+  }
+}
+
+// E-mails de todos os colaboradores ATIVOS com e-mail (cadastro = funcionarios).
+async function emailsColaboradoresAtivos() {
+  const snap = await dbA.collection('funcionarios').get()
+  const set = new Set()
+  snap.forEach((doc) => { const e = emailDe(doc.data()); if (e) set.add(e) })
+  return Array.from(set)
+}
+
+// Resumo em texto puro do corpo (rico) do aviso, sem HTML e com teto de tamanho.
+function resumoDoCorpo(html, max) {
+  const teto = max || 240
+  const txt = String(html || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (txt.length <= teto) return txt
+  return txt.slice(0, teto).replace(/\s+\S*$/, '') + '…'
+}
+
+function montarHtmlMural(titulo, resumo) {
+  const t = escapar(titulo)
+  const r = escapar(resumo)
+  const href = SITE + '/mural'
+  return `<!doctype html><html lang="pt-BR"><body style="margin:0;background:#f4f5f7;padding:24px;font-family:Arial,Helvetica,sans-serif;color:#1a1714">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e7e8ec">
+      <tr><td style="background:#002443;padding:18px 24px;color:#ffffff;font-size:15px;font-weight:bold">Gente e Cultura</td></tr>
+      <tr><td style="padding:24px">
+        <p style="margin:0 0 6px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#1a4895;font-weight:bold">Novo no mural</p>
+        <h1 style="margin:0 0 10px;font-size:18px;color:#002443">${t}</h1>
+        <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#44474d">${r}</p>
+        <a href="${href}" style="display:inline-block;background:#1a4895;color:#ffffff;text-decoration:none;font-size:14px;font-weight:bold;padding:11px 20px;border-radius:9px">Ver no mural</a>
+      </td></tr>
+      <tr><td style="padding:16px 24px;border-top:1px solid #eef0f3;font-size:12px;color:#8a8d93">
+        Você recebeu este aviso porque participa do portal Gente Cultura da Soulan. Acesse ${SITE} para ver o conteúdo completo.
+      </td></tr>
+    </table>
+  </td></tr></table>
+</body></html>`
+}
+
+// Gatilho: um aviso do mural passou a publicado -> e-mail para os ativos.
+exports.emailDoMural = onDocumentWritten(
+  { document: 'posts/{id}', secrets: [GMAIL_APP_PASSWORD] },
+  async (event) => {
+    const change = event.data
+    if (!change) return
+    const after = change.after
+    if (!after || !after.exists) return // exclusao: ignora
+    const p = after.data() || {}
+
+    // Só avisos do "Gente Informa", já publicados.
+    if (p.categoria !== 'informa' || p.publicado !== true) return
+
+    // Só a TRANSICAO para publicado dispara. Se já estava publicado antes desta
+    // gravação, é edição / repost / reação: não reenvia.
+    const before = change.before
+    const jaEstavaPublicado = !!(before && before.exists && (before.data() || {}).publicado === true)
+    if (jaEstavaPublicado) return
+
+    // Já disparado alguma vez? Nunca reenvia.
+    if (p.email_mural_em) return
+
+    if (!(await muralEmailLigado())) {
+      logger.info('mural_email desligado; nada enviado')
+      return
+    }
+
+    // Trava de envio único (idempotência contra reentregas do gatilho): quem
+    // gravar email_mural_em primeiro é quem envia.
+    const ref = after.ref
+    const reservou = await dbA.runTransaction(async (tx) => {
+      const d = await tx.get(ref)
+      const cur = d.data() || {}
+      if (cur.categoria !== 'informa' || cur.publicado !== true) return false
+      if (cur.email_mural_em) return false
+      tx.update(ref, { email_mural_em: new Date().toISOString(), email_mural_status: 'enviando' })
+      return true
+    }).catch((e) => { logger.error('reserva do envio falhou', e); return false })
+    if (!reservou) return
+
+    let destinatarios = []
+    try {
+      destinatarios = await emailsColaboradoresAtivos()
+    } catch (e) {
+      logger.error('falha ao listar colaboradores ativos', e)
+    }
+    if (destinatarios.length === 0) {
+      await ref.set({ email_mural_status: 'sem_destinatario', email_mural_em: new Date().toISOString() }, { merge: true }).catch(() => {})
+      return
+    }
+
+    const titulo = p.titulo || 'Novo aviso no mural'
+    const resumo = resumoDoCorpo(p.corpo)
+    const html = montarHtmlMural(titulo, resumo)
+    const texto = `${titulo}\n\n${resumo}\n\nAcesse o portal para ver: ${SITE}/mural`
+
+    let r = { enviados: 0, falhas: destinatarios.length }
+    try {
+      r = await enviarMuralBcc({ assunto: `Novo no mural: ${titulo}`, html, texto, destinatarios })
+    } catch (e) {
+      logger.error('envio do mural falhou', e)
+    }
+    logger.info(`mural "${titulo}": ${r.enviados} enviados, ${r.falhas} falharam (de ${destinatarios.length})`)
+
+    await ref.set({
+      email_mural_status: r.falhas ? (r.enviados ? 'parcial' : 'falhou') : 'enviado',
+      email_mural_enviados: r.enviados,
+      email_mural_falhas: r.falhas,
+      email_mural_total: destinatarios.length,
+      email_mural_em: new Date().toISOString(),
     }, { merge: true }).catch(() => {})
   },
 )
