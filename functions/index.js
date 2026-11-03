@@ -12,9 +12,10 @@
 //
 // Função de teste (só admin logado): testeEmail({ para: '...' }).
 //
-// Canal separado: emailDoMural envia por SMTP do Workspace (./smtp.js,
-// secret GMAIL_APP_PASSWORD) quando um aviso do "Gente Informa" é publicado,
-// para todos os colaboradores ativos, em BCC. Não usa o config/email acima.
+// Canal separado: emailDoMural também usa o SendGrid (mesma chave), mas com a
+// sua própria trava (config/mural_email) e seu próprio recorte: quando um aviso
+// do "Gente Informa" é publicado, manda para todos os colaboradores ativos.
+// Não depende do config/email acima.
 // =============================================================
 const { onCall, HttpsError } = require('firebase-functions/v2/https')
 const { onDocumentCreated, onDocumentWritten } = require('firebase-functions/v2/firestore')
@@ -22,7 +23,6 @@ const { setGlobalOptions } = require('firebase-functions/v2')
 const { logger } = require('firebase-functions')
 const admin = require('firebase-admin')
 const { SENDGRID_API_KEY, enviarEmail } = require('./sendgrid')
-const { GMAIL_APP_PASSWORD, enviarMuralBcc } = require('./smtp')
 
 admin.initializeApp()
 const dbA = admin.firestore()
@@ -182,11 +182,11 @@ exports.emailDaNotificacao = onDocumentCreated(
 // =============================================================
 // Mural (Gente Informa) -> e-mail para todos os colaboradores ativos.
 //
-// Canal SEPARADO do SendGrid: envia por SMTP do Workspace (ver ./smtp.js),
-// com a senha de app no cofre (GMAIL_APP_PASSWORD). Dispara UMA vez, quando um
-// aviso do "Gente Informa" passa a PUBLICADO (nasce publicado ou um rascunho e
+// Envia pelo SendGrid (mesma chave do sino). Dispara UMA vez, quando um aviso
+// do "Gente Informa" passa a PUBLICADO (nasce publicado ou um rascunho e
 // publicado). Nunca reenvia: edicao, repost, reacao ou publicacao antiga nao
-// geram novo e-mail. Reconhecimentos (elogios) NAO entram aqui.
+// geram novo e-mail. Reconhecimentos (elogios) NAO entram aqui. Cada pessoa
+// recebe o seu proprio e-mail (ninguem ve o endereco do outro).
 // =============================================================
 
 // Interruptor opcional (config/mural_email.ativo). Sem o doc, fica LIGADO.
@@ -247,7 +247,7 @@ function montarHtmlMural(titulo, resumo) {
 
 // Gatilho: um aviso do mural passou a publicado -> e-mail para os ativos.
 exports.emailDoMural = onDocumentWritten(
-  { document: 'posts/{id}', secrets: [GMAIL_APP_PASSWORD] },
+  { document: 'posts/{id}', secrets: [SENDGRID_API_KEY] },
   async (event) => {
     const change = event.data
     if (!change) return
@@ -300,13 +300,14 @@ exports.emailDoMural = onDocumentWritten(
     const resumo = resumoDoCorpo(p.corpo)
     const html = montarHtmlMural(titulo, resumo)
     const texto = `${titulo}\n\n${resumo}\n\nAcesse o portal para ver: ${SITE}/mural`
+    const assunto = `Novo no mural: ${titulo}`
 
-    let r = { enviados: 0, falhas: destinatarios.length }
-    try {
-      r = await enviarMuralBcc({ assunto: `Novo no mural: ${titulo}`, html, texto, destinatarios })
-    } catch (e) {
-      logger.error('envio do mural falhou', e)
-    }
+    // Um e-mail por pessoa (ninguém vê o endereço do outro). Best-effort.
+    const resultados = await Promise.allSettled(
+      destinatarios.map((para) => enviarEmail({ para, assunto, html, texto })),
+    )
+    const enviados = resultados.filter((x) => x.status === 'fulfilled').length
+    const r = { enviados, falhas: resultados.length - enviados }
     logger.info(`mural "${titulo}": ${r.enviados} enviados, ${r.falhas} falharam (de ${destinatarios.length})`)
 
     await ref.set({
