@@ -145,12 +145,19 @@ exports.emailDaNotificacao = onDocumentCreated(
     const snap = event.data
     if (!snap) return
     const n = snap.data() || {}
+    const alvo = String(n.alvo || '')
 
-    // O gestor passa a receber um RESUMO DIARIO (resumoDiarioGestor), entao o
-    // e-mail por solicitacao para o gestor fica desligado. Financeiro (f),
-    // colaborador (u:) e master (m) continuam recebendo normalmente.
-    if (String(n.alvo || '').startsWith('g:')) {
-      logger.info('alvo de gestor: e-mail por solicitacao desligado (usa resumo diario)')
+    // Reembolso usa RESUMOS agendados para gestor, master e financeiro: o
+    // e-mail por evento desses tres fica desligado (vira resumo diario).
+    if (alvo.startsWith('g:') || alvo === 'm' || alvo === 'f') {
+      logger.info(`alvo ${alvo}: e-mail por evento desligado (usa resumo agendado)`)
+      return
+    }
+    // Colaborador recebe e-mail por evento SO em recusa, pago e agendado.
+    // Os avisos intermediarios (aprovado em andamento, reenviado) ficam no sino.
+    const EMAIL_AO_COLABORADOR = new Set(['reembolso_recusado', 'reembolso_pago', 'reembolso_agendado'])
+    if (alvo.startsWith('u:') && String(n.tipo).startsWith('reembolso_') && !EMAIL_AO_COLABORADOR.has(n.tipo)) {
+      logger.info(`colaborador: e-mail so em recusa/pagamento (tipo=${n.tipo} ignorado)`)
       return
     }
 
@@ -387,64 +394,103 @@ function fmtData(iso) {
   return d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })
 }
 
-// Interruptor próprio (config/resumo_reembolso.ativo). Sem o doc, fica LIGADO.
-async function resumoLigado() {
+// Config dos resumos (config/resumo_reembolso). Sem o doc, fica LIGADO e sem
+// teste. `teste_para`: enquanto tiver um e-mail, TODO resumo vai so para esse
+// endereco (com aviso de quem seria o destinatario real), para conferir
+// horario, lista e link antes de ligar para todos.
+async function lerConfigResumo() {
   try {
     const s = await dbA.doc('config/resumo_reembolso').get()
-    return !s.exists || s.data().ativo !== false
+    const d = s.exists ? (s.data() || {}) : {}
+    return {
+      ativo: d.ativo !== false,
+      teste_para: typeof d.teste_para === 'string' ? d.teste_para.trim() : '',
+    }
   } catch (e) {
     logger.error('config/resumo_reembolso ilegível', e)
-    return true
+    return { ativo: true, teste_para: '' }
   }
 }
 
-function montarHtmlResumo(itens) {
-  const linhas = itens.map((i) => `
-    <tr>
-      <td style="padding:8px 12px;border-bottom:1px solid #eef0f3;font-size:14px;color:#1a1714">${escapar(i.solicitante)}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #eef0f3;font-size:14px;color:#44474d;white-space:nowrap">${escapar(fmtData(i.data))}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #eef0f3;font-size:14px;color:#44474d">${escapar(i.categoria)}</td>
-    </tr>`).join('')
+function bannerTeste(destinoReal) {
+  return `<div style="margin:0 0 16px;padding:10px 14px;background:#fff6e5;border:1px solid #ffd98a;border-radius:9px;font-size:13px;color:#8a5a00">
+    E-mail de <strong>teste</strong>. Em produção, iria para: ${escapar(destinoReal)}.
+  </div>`
+}
+
+// Envia o resumo; se houver e-mail de teste configurado, redireciona tudo para
+// ele (assunto marcado e banner no corpo). O HTML tem o marcador <!--BANNER-->.
+async function enviarResumo(cfg, { paraReal, assunto, html, texto }) {
+  if (cfg.teste_para) {
+    return enviarEmail({
+      para: cfg.teste_para,
+      assunto: `[TESTE] ${assunto}`,
+      html: html.replace('<!--BANNER-->', bannerTeste(paraReal)),
+      texto: `*** TESTE: em produção iria para ${paraReal} ***\n\n${texto}`,
+    })
+  }
+  return enviarEmail({ para: paraReal, assunto, html: html.replace('<!--BANNER-->', ''), texto })
+}
+
+// Cartao padrao de um resumo: titulo, uma linha de introducao, tabela e botao.
+// `intro` entra como HTML (so conteudo que esta funcao controla: contagens).
+function cartaoResumo(titulo, intro, cabecalhos, linhas) {
+  const ths = cabecalhos
+    .map((h) => `<th align="left" style="padding:8px 12px;font-size:12px;color:#8a8d93;text-transform:uppercase">${escapar(h)}</th>`)
+    .join('')
+  const trs = linhas
+    .map((cols) => `<tr>${cols.map((c) => `<td style="padding:8px 12px;border-bottom:1px solid #eef0f3;font-size:14px;color:#1a1714">${escapar(c)}</td>`).join('')}</tr>`)
+    .join('')
   const href = SITE + '/reembolso'
-  const n = itens.length
   return `<!doctype html><html lang="pt-BR"><body style="margin:0;background:#f4f5f7;padding:24px;font-family:Arial,Helvetica,sans-serif;color:#1a1714">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e7e8ec">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e7e8ec">
       <tr><td style="background:#002443;padding:18px 24px;color:#ffffff;font-size:15px;font-weight:bold">Gente e Cultura</td></tr>
       <tr><td style="padding:24px">
-        <h1 style="margin:0 0 6px;font-size:18px;color:#002443">Reembolsos aguardando sua aprovação</h1>
-        <p style="margin:0 0 18px;font-size:14px;color:#44474d">Você tem <strong>${n}</strong> ${n === 1 ? 'pedido' : 'pedidos'} na sua fila. Os valores ficam no portal, por segurança.</p>
+        <!--BANNER-->
+        <h1 style="margin:0 0 6px;font-size:18px;color:#002443">${escapar(titulo)}</h1>
+        <p style="margin:0 0 18px;font-size:14px;color:#44474d">${intro}</p>
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #eef0f3;border-radius:10px;overflow:hidden">
-          <tr style="background:#f7f8fa">
-            <th align="left" style="padding:8px 12px;font-size:12px;color:#8a8d93;text-transform:uppercase">Solicitante</th>
-            <th align="left" style="padding:8px 12px;font-size:12px;color:#8a8d93;text-transform:uppercase">Data</th>
-            <th align="left" style="padding:8px 12px;font-size:12px;color:#8a8d93;text-transform:uppercase">Categoria</th>
-          </tr>
-          ${linhas}
+          <tr style="background:#f7f8fa">${ths}</tr>
+          ${trs}
         </table>
-        <p style="margin:20px 0 0"><a href="${href}" style="display:inline-block;background:#1a4895;color:#ffffff;text-decoration:none;font-size:14px;font-weight:bold;padding:11px 20px;border-radius:9px">Aprovar no portal</a></p>
+        <p style="margin:20px 0 0"><a href="${href}" style="display:inline-block;background:#1a4895;color:#ffffff;text-decoration:none;font-size:14px;font-weight:bold;padding:11px 20px;border-radius:9px">Abrir no portal</a></p>
       </td></tr>
       <tr><td style="padding:16px 24px;border-top:1px solid #eef0f3;font-size:12px;color:#8a8d93">
-        Resumo diário. Acesse ${SITE} para aprovar ou recusar.
+        Resumo automático. Os valores ficam no portal, por segurança. Acesse ${SITE}.
       </td></tr>
     </table>
   </td></tr></table>
 </body></html>`
 }
 
-function textoResumo(itens) {
-  const linhas = itens.map((i) => `- ${i.solicitante} · ${fmtData(i.data)} · ${i.categoria}`).join('\n')
-  return `Você tem ${itens.length} reembolso(s) aguardando aprovação.\n\n${linhas}\n\nAprove no portal: ${SITE}/reembolso`
+// Destinatarios do resumo do Master: papel master + contas da colecao admins.
+async function emailsMaster() {
+  const set = new Set()
+  for (const r of await porPapel('master')) set.add(r.email)
+  try {
+    const adm = await dbA.collection('admins').get()
+    adm.forEach((doc) => { const e = emailDe(doc.data()); if (e) set.add(e) })
+  } catch (e) { logger.error('admins ilegível', e) }
+  return Array.from(set)
 }
 
-// Rotina diária (08:00 America/Sao_Paulo): um resumo por gestor, só o centro dele.
+// Rotulo curto da etapa, para a coluna "Situacao" do resumo do Master.
+const STATUS_RESUMO_LABEL = {
+  pendente_gestor: 'Aguardando gestor',
+  pendente_master: 'Aguardando Master',
+  pendente_financeiro: 'Aguardando pagamento',
+}
+
+// -------------------------------------------------------------
+// GESTOR: um resumo por dia (10:00), so o centro de custo dele, dos pedidos
+// aguardando a aprovacao dele. Sem pendencia, nao envia.
+// -------------------------------------------------------------
 exports.resumoDiarioGestor = onSchedule(
-  { schedule: '0 8 * * *', timeZone: 'America/Sao_Paulo', secrets: [SENDGRID_API_KEY] },
+  { schedule: '0 10 * * *', timeZone: 'America/Sao_Paulo', secrets: [SENDGRID_API_KEY] },
   async () => {
-    if (!(await resumoLigado())) {
-      logger.info('resumo diário desligado; nada enviado')
-      return
-    }
+    const cfg = await lerConfigResumo()
+    if (!cfg.ativo) { logger.info('resumos desligados; nada enviado'); return }
 
     const snap = await dbA.collection('reembolsos').where('status', '==', 'pendente_gestor').get()
     const pendentes = []
@@ -453,12 +499,12 @@ exports.resumoDiarioGestor = onSchedule(
       pendentes.push({
         centro: r.centro_custo || '',
         solicitante: r.solicitante_nome || r.solicitante_email || 'Colaborador',
-        data: r.data_despesa || r.criado_em || '',
+        data: fmtData(r.data_despesa || r.criado_em || ''),
         categoria: r.categoria || '',
       })
     })
 
-    const gestores = await porPapel('gestor') // [{ email, data }], só ativos com e-mail
+    const gestores = await porPapel('gestor') // [{ email, data }], so ativos com e-mail
     let comPendencia = 0
     let enviados = 0
     let falhas = 0
@@ -466,29 +512,129 @@ exports.resumoDiarioGestor = onSchedule(
       const centro = (g.data.centro_custo || '').trim()
       const abrange = centro === TODOS_CENTROS
       const meus = pendentes.filter((p) => abrange || mesmoCentro(p.centro, centro))
-      if (meus.length === 0) continue // sem pendência: não envia
+      if (meus.length === 0) continue // sem pendencia: nao envia
       comPendencia++
+      const intro = `Você tem <strong>${meus.length}</strong> ${meus.length === 1 ? 'pedido' : 'pedidos'} aguardando a sua aprovação.`
+      const html = cartaoResumo('Reembolsos aguardando sua aprovação', intro,
+        ['Solicitante', 'Data', 'Categoria'],
+        meus.map((i) => [i.solicitante, i.data, i.categoria]))
+      const texto = `Você tem ${meus.length} reembolso(s) aguardando aprovação.\n\n`
+        + meus.map((i) => `- ${i.solicitante} · ${i.data} · ${i.categoria}`).join('\n')
+        + `\n\nAprove no portal: ${SITE}/reembolso`
       try {
-        await enviarEmail({
-          para: g.email,
-          assunto: `Reembolsos aguardando sua aprovação (${meus.length})`,
-          html: montarHtmlResumo(meus),
-          texto: textoResumo(meus),
-        })
+        await enviarResumo(cfg, { paraReal: g.email, assunto: `Reembolsos aguardando sua aprovação (${meus.length})`, html, texto })
         enviados++
       } catch (e) {
         falhas++
-        logger.error(`resumo diário falhou para ${g.email}`, e)
+        logger.error(`resumo gestor falhou para ${g.email}`, e)
       }
     }
 
-    logger.info(`resumo diário: ${comPendencia} gestores com pendência, ${enviados} enviados, ${falhas} falharam`)
-    await dbA.doc('config/resumo_reembolso').set({
-      ultima_execucao: new Date().toISOString(),
-      pendentes_total: pendentes.length,
-      gestores_com_pendencia: comPendencia,
-      enviados,
-      falhas,
-    }, { merge: true }).catch(() => {})
+    logger.info(`resumo gestor: ${comPendencia} com pendência, ${enviados} enviados, ${falhas} falharam`)
+    await dbA.doc('config/resumo_reembolso').set({ gestor: {
+      ultima_execucao: new Date().toISOString(), pendentes_total: pendentes.length,
+      com_pendencia: comPendencia, enviados, falhas, teste: !!cfg.teste_para,
+    } }, { merge: true }).catch(() => {})
+  },
+)
+
+// -------------------------------------------------------------
+// MASTER: um resumo por dia (10:00) com TODOS os pendentes de todas as areas
+// (aguardando aprovacao do gestor/master + aguardando pagamento). Visao geral.
+// Nao inclui agendados (ja resolvidos pelo Financeiro). Sem pendencia, nao envia.
+// -------------------------------------------------------------
+exports.resumoDiarioMaster = onSchedule(
+  { schedule: '0 10 * * *', timeZone: 'America/Sao_Paulo', secrets: [SENDGRID_API_KEY] },
+  async () => {
+    const cfg = await lerConfigResumo()
+    if (!cfg.ativo) { logger.info('resumos desligados; nada enviado'); return }
+
+    const snap = await dbA.collection('reembolsos')
+      .where('status', 'in', ['pendente_gestor', 'pendente_master', 'pendente_financeiro']).get()
+    const itens = []
+    snap.forEach((d) => {
+      const r = d.data() || {}
+      itens.push({
+        solicitante: r.solicitante_nome || r.solicitante_email || 'Colaborador',
+        data: fmtData(r.data_despesa || r.criado_em || ''),
+        centro: r.centro_custo || '-',
+        situacao: STATUS_RESUMO_LABEL[r.status] || r.status,
+        ordem: r.criado_em || '',
+      })
+    })
+    if (itens.length === 0) { logger.info('resumo master: sem pendências; nada enviado'); return }
+    itens.sort((a, b) => String(a.ordem).localeCompare(String(b.ordem)))
+
+    const destinatarios = await emailsMaster()
+    if (destinatarios.length === 0) { logger.info('resumo master: sem destinatário'); return }
+
+    const intro = `Há <strong>${itens.length}</strong> ${itens.length === 1 ? 'solicitação pendente' : 'solicitações pendentes'} no total (aguardando aprovação ou pagamento).`
+    const html = cartaoResumo('Reembolsos pendentes (visão geral)', intro,
+      ['Solicitante', 'Data', 'Centro de custo', 'Situação'],
+      itens.map((i) => [i.solicitante, i.data, i.centro, i.situacao]))
+    const texto = `${itens.length} solicitação(ões) pendente(s) no total.\n\n`
+      + itens.map((i) => `- ${i.solicitante} · ${i.data} · ${i.centro} · ${i.situacao}`).join('\n')
+      + `\n\nVer no portal: ${SITE}/reembolso`
+
+    let enviados = 0
+    let falhas = 0
+    for (const para of destinatarios) {
+      try { await enviarResumo(cfg, { paraReal: para, assunto: `Reembolsos pendentes: visão geral (${itens.length})`, html, texto }); enviados++ }
+      catch (e) { falhas++; logger.error(`resumo master falhou para ${para}`, e) }
+    }
+    logger.info(`resumo master: ${itens.length} pendentes, ${enviados} enviados, ${falhas} falharam`)
+    await dbA.doc('config/resumo_reembolso').set({ master: {
+      ultima_execucao: new Date().toISOString(), pendentes_total: itens.length, enviados, falhas, teste: !!cfg.teste_para,
+    } }, { merge: true }).catch(() => {})
+  },
+)
+
+// -------------------------------------------------------------
+// FINANCEIRO: dois resumos por dia (10:00 e 15:00) com os reembolsos aprovados
+// aguardando pagamento (pendente_financeiro). Sem nada a pagar, nao envia.
+// -------------------------------------------------------------
+exports.resumoFinanceiro = onSchedule(
+  { schedule: '0 10,15 * * *', timeZone: 'America/Sao_Paulo', secrets: [SENDGRID_API_KEY] },
+  async () => {
+    const cfg = await lerConfigResumo()
+    if (!cfg.ativo) { logger.info('resumos desligados; nada enviado'); return }
+
+    const snap = await dbA.collection('reembolsos').where('status', '==', 'pendente_financeiro').get()
+    const itens = []
+    snap.forEach((d) => {
+      const r = d.data() || {}
+      itens.push({
+        solicitante: r.solicitante_nome || r.solicitante_email || 'Colaborador',
+        data: fmtData(r.data_despesa || r.criado_em || ''),
+        centro: r.centro_custo || '-',
+        categoria: r.categoria || '',
+        ordem: r.criado_em || '',
+      })
+    })
+    if (itens.length === 0) { logger.info('resumo financeiro: nada a pagar; nada enviado'); return }
+    itens.sort((a, b) => String(a.ordem).localeCompare(String(b.ordem)))
+
+    const destinatarios = []
+    for (const r of await porPapel('financeiro')) destinatarios.push(r.email)
+    if (destinatarios.length === 0) { logger.info('resumo financeiro: sem destinatário'); return }
+
+    const intro = `Há <strong>${itens.length}</strong> ${itens.length === 1 ? 'reembolso aprovado aguardando pagamento' : 'reembolsos aprovados aguardando pagamento'}.`
+    const html = cartaoResumo('Reembolsos aguardando pagamento', intro,
+      ['Solicitante', 'Data', 'Centro de custo', 'Categoria'],
+      itens.map((i) => [i.solicitante, i.data, i.centro, i.categoria]))
+    const texto = `${itens.length} reembolso(s) aguardando pagamento.\n\n`
+      + itens.map((i) => `- ${i.solicitante} · ${i.data} · ${i.centro} · ${i.categoria}`).join('\n')
+      + `\n\nRegistrar no portal: ${SITE}/reembolso`
+
+    let enviados = 0
+    let falhas = 0
+    for (const para of destinatarios) {
+      try { await enviarResumo(cfg, { paraReal: para, assunto: `Reembolsos aguardando pagamento (${itens.length})`, html, texto }); enviados++ }
+      catch (e) { falhas++; logger.error(`resumo financeiro falhou para ${para}`, e) }
+    }
+    logger.info(`resumo financeiro: ${itens.length} a pagar, ${enviados} enviados, ${falhas} falharam`)
+    await dbA.doc('config/resumo_reembolso').set({ financeiro: {
+      ultima_execucao: new Date().toISOString(), pendentes_total: itens.length, enviados, falhas, teste: !!cfg.teste_para,
+    } }, { merge: true }).catch(() => {})
   },
 )

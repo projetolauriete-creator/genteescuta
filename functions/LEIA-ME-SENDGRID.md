@@ -11,12 +11,25 @@ Base entregue pela equipe do Rike; o disparo e o painel foram montados por cima.
     é criada, resolve o destinatário (`u:uid` / `g:centro` / `f` / `m`) nos mesmos
     e-mails do sino e envia. **Só envia quando o painel estiver ligado.**
   - `testeEmail({ para })`: envio de teste, só para administrador logado.
-  - `resumoDiarioGestor`: rotina agendada (08:00 America/Sao_Paulo). Um resumo
-    por Gestor Aprovador com os reembolsos aguardando a aprovação dele (só o
-    centro de custo dele, sem valores), link para o portal. Substitui o e-mail
-    por solicitação ao gestor: por isso o `emailDaNotificacao` ignora alvo `g:`.
-    Liga/desliga em `config/resumo_reembolso.ativo` (sem o doc, ligado); o
-    resultado de cada execução fica nesse mesmo doc.
+  - **Resumos de reembolso** (agendados, America/Sao_Paulo), sem valores, só o
+    essencial + link do portal. Cada papel vê só o que lhe cabe:
+    - `resumoDiarioGestor` (10:00): um por Gestor, só o centro de custo dele,
+      dos pedidos aguardando a aprovação dele.
+    - `resumoDiarioMaster` (10:00): visão geral, todos os pendentes de todas as
+      áreas (aguardando gestor/master + aguardando pagamento). Não inclui
+      agendados. Vai para papel master + contas `admins`.
+    - `resumoFinanceiro` (10:00 e 15:00): aprovados aguardando pagamento
+      (`pendente_financeiro`), para o papel financeiro.
+    Quem não tem pendência não recebe. Envio individual (ninguém vê o e-mail do
+    outro). Por isso o `emailDaNotificacao` ignora os alvos `g:`, `m` e `f`.
+  - **Colaborador**: continua recebendo e-mail por evento, mas só em recusa,
+    pago e agendado (os intermediários ficam só no sino).
+  - Liga/desliga tudo em `config/resumo_reembolso.ativo` (sem o doc, ligado).
+    Teste: ponha um e-mail em `config/resumo_reembolso.teste_para` e TODO resumo
+    vai só para esse endereço (assunto `[TESTE]`, com aviso de quem seria o real)
+    para conferir horário, lista e link; apague o campo para entrar no ar. O
+    resultado de cada execução fica em `config/resumo_reembolso` (gestor/master/
+    financeiro).
 - Painel admin **Sistema > Disparo de e-mail** (`/admin/email`, só Super Admin):
   liga/desliga o disparo geral, liga/desliga por tipo de aviso e manda teste.
   O estado fica em `config/email` (`ativo`, `tipos`). Começa **desligado**.
