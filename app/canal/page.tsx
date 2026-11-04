@@ -9,9 +9,10 @@ import {
   Trash2,
   Inbox,
   ShieldCheck,
+  Star,
 } from 'lucide-react'
 import { configurado } from '@/lib/firebase'
-import { getConfig, listarMinhasManifestacoes, excluirMinhaManifestacao } from '@/lib/fb/publico'
+import { getConfig, listarMinhasManifestacoes, excluirMinhaManifestacao, avaliarManifestacao } from '@/lib/fb/publico'
 import { observarLogin } from '@/lib/fb/auth'
 import { TIPO_MANIFESTACAO_LABEL, TRIAGEM_LABEL } from '@/lib/types'
 import { CabecalhoPublico, RodapePublico } from '@/components/CabecalhoPublico'
@@ -218,6 +219,16 @@ function MinhasManifestacoes() {
                         ))}
                     </div>
                   )}
+                  <AvaliarResposta
+                    m={m}
+                    aoAvaliar={(nota, obs, quando) =>
+                      setItens((atual) =>
+                        (atual ?? []).map((x) =>
+                          x.id === m.id ? { ...x, avaliacao: nota, avaliacao_obs: obs, avaliacao_em: quando } : x,
+                        ),
+                      )
+                    }
+                  />
                 </div>
                 <button
                   type="button"
@@ -234,5 +245,128 @@ function MinhasManifestacoes() {
         </ul>
       )}
     </section>
+  )
+}
+
+// -------------------------------------------------------------
+// Avaliação da RESPOSTA (0 a 5 estrelas + observação opcional).
+// Aparece só quando já existe resposta da equipe. É sobre a resposta
+// de Gente e Cultura, não sobre o assunto original. Opcional e editável.
+// -------------------------------------------------------------
+function temResposta(m: any): boolean {
+  if (m?.resposta_privada) return true
+  return Array.isArray(m?.updates) && m.updates.some((u: any) => u?.visivel_ao_colaborador && u?.mensagem)
+}
+
+function Estrelas({ nota, tamanho = 18 }: { nota: number; tamanho?: number }) {
+  return (
+    <span className="inline-flex items-center gap-0.5" aria-label={`${nota} de 5 estrelas`}>
+      {[1, 2, 3, 4, 5].map((i) => (
+        <Star
+          key={i}
+          size={tamanho}
+          aria-hidden
+          className={i <= nota ? 'text-marca' : 'text-borda-forte'}
+          fill={i <= nota ? 'currentColor' : 'none'}
+        />
+      ))}
+    </span>
+  )
+}
+
+function AvaliarResposta({
+  m,
+  aoAvaliar,
+}: {
+  m: any
+  aoAvaliar: (nota: number, obs: string | null, quando: string) => void
+}) {
+  const jaAvaliou = typeof m.avaliacao === 'number' && m.avaliacao >= 1
+  const [editando, setEditando] = useState(false)
+  const [nota, setNota] = useState<number>(jaAvaliou ? m.avaliacao : 0)
+  const [obs, setObs] = useState<string>(m.avaliacao_obs ?? '')
+  const [enviando, setEnviando] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+
+  if (!temResposta(m)) return null
+
+  // Já avaliou e não está editando: mostra a avaliação registrada.
+  if (jaAvaliou && !editando) {
+    return (
+      <div className="mt-2.5 rounded-lg border border-borda bg-superficie-2 px-3 py-2.5">
+        <p className="text-xs font-semibold text-tinta-3">Sua avaliação da resposta</p>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <Estrelas nota={m.avaliacao} />
+          <span className="text-xs text-tinta-3">· {fmtData(m.avaliacao_em)}</span>
+          <button
+            type="button"
+            onClick={() => { setNota(m.avaliacao); setObs(m.avaliacao_obs ?? ''); setErro(null); setEditando(true) }}
+            className="ml-auto text-xs font-medium text-marca hover:underline"
+          >
+            Editar
+          </button>
+        </div>
+        {m.avaliacao_obs && <p className="mt-1.5 text-sm leading-6 text-tinta-2">{m.avaliacao_obs}</p>}
+      </div>
+    )
+  }
+
+  async function enviar() {
+    if (!(nota >= 1)) { setErro('Escolha de 1 a 5 estrelas.'); return }
+    setErro(null); setEnviando(true)
+    try {
+      const quando = new Date().toISOString()
+      await avaliarManifestacao(m.id, nota, obs)
+      aoAvaliar(nota, obs.trim() || null, quando)
+      setEditando(false)
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : 'Não consegui registrar a avaliação.')
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  return (
+    <div className="mt-2.5 rounded-lg border border-borda bg-superficie-2 px-3 py-2.5">
+      <p className="text-sm font-semibold text-tinta">Essa resposta te ajudou?</p>
+      <p className="mt-0.5 text-xs text-tinta-3">Avalie a resposta da equipe (não o assunto original). É opcional e você pode mudar depois.</p>
+      <div className="mt-2 flex items-center gap-1">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <button
+            key={i}
+            type="button"
+            aria-label={`${i} ${i === 1 ? 'estrela' : 'estrelas'}`}
+            onClick={() => setNota(i)}
+            className="rounded p-0.5 text-borda-forte transition-colors hover:text-marca"
+          >
+            <Star size={24} aria-hidden className={i <= nota ? 'text-marca' : ''} fill={i <= nota ? 'currentColor' : 'none'} />
+          </button>
+        ))}
+      </div>
+      <textarea
+        value={obs}
+        onChange={(e) => setObs(e.target.value)}
+        rows={2}
+        maxLength={1000}
+        placeholder="Quer deixar uma observação? (opcional)"
+        className="mt-2 w-full rounded-lg border border-borda bg-white px-3 py-2 text-sm text-tinta placeholder:text-tinta-3 focus:border-marca focus:outline-none"
+      />
+      {erro && <p className="mt-1.5 text-xs text-[#8a1f1f]">{erro}</p>}
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          disabled={enviando || !(nota >= 1)}
+          onClick={enviar}
+          className="rounded-lg bg-marca px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-marca-escura disabled:opacity-40"
+        >
+          {enviando ? 'Enviando…' : jaAvaliou ? 'Salvar avaliação' : 'Enviar avaliação'}
+        </button>
+        {jaAvaliou && (
+          <button type="button" onClick={() => setEditando(false)} className="text-sm text-tinta-3 hover:text-tinta">
+            Cancelar
+          </button>
+        )}
+      </div>
+    </div>
   )
 }

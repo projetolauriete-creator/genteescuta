@@ -202,7 +202,15 @@ service cloud.firestore {
         || (request.auth != null && request.resource.data.autor_uid == request.auth.uid);
       allow read: if podeConteudo()
         || (request.auth != null && resource.data.get('autor_uid', null) == request.auth.uid);
-      allow update: if podeConteudo();
+      // Admin trata tudo. O AUTOR pode avaliar a resposta (só os campos de avaliação).
+      allow update: if podeConteudo()
+        || (request.auth != null
+            && resource.data.get('autor_uid', null) == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['avaliacao', 'avaliacao_obs', 'avaliacao_em'])
+            && request.resource.data.avaliacao is int
+            && request.resource.data.avaliacao >= 1
+            && request.resource.data.avaliacao <= 5);
       allow delete: if podeConteudo()
         || (request.auth != null && resource.data.get('autor_uid', null) == request.auth.uid);
     }

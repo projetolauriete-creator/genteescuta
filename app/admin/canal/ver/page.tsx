@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Mail, UserX, MapPin, Calendar, User, Building2, CheckCircle2, XCircle, MessageSquare, CheckCheck, RotateCcw } from 'lucide-react'
+import { Mail, UserX, MapPin, Calendar, User, Building2, CheckCircle2, XCircle, MessageSquare, CheckCheck, RotateCcw, Star } from 'lucide-react'
 import { getManifestacao, triarManifestacao, responderPeloPortal, concluirManifestacao, reabrirManifestacao, marcarAnalise } from '@/lib/fb/admin'
 import { usuarioAtual } from '@/lib/fb/auth'
 import { CabecalhoPagina, Cartao, Chip, Aviso, Botao } from '@/components/ui'
@@ -134,6 +134,22 @@ function Detalhe() {
               )}
             </dl>
           </Cartao>
+
+          {typeof m.avaliacao === 'number' && m.avaliacao >= 1 && (
+            <Cartao titulo="Avaliação da resposta">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-0.5">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <Star key={i} size={18} aria-hidden className={i <= m.avaliacao ? 'text-marca' : 'text-borda-forte'} fill={i <= m.avaliacao ? 'currentColor' : 'none'} />
+                  ))}
+                </span>
+                <span className="text-sm font-semibold text-tinta">{m.avaliacao} de 5</span>
+              </div>
+              {m.avaliacao_obs && <p className="mt-2 whitespace-pre-line text-sm leading-6 text-tinta-2">{m.avaliacao_obs}</p>}
+              {m.avaliacao_em && <p className="mt-2 text-xs text-tinta-3">Avaliada em {fmtDataHora(m.avaliacao_em)}</p>}
+              <p className="mt-2 text-xs text-tinta-3">O autor avaliou a resposta de Gente e Cultura, não o assunto original.</p>
+            </Cartao>
+          )}
 
           <Cartao titulo="Histórico"><LinhaDoTempo eventos={historico} /></Cartao>
         </div>

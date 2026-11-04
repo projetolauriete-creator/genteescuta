@@ -179,6 +179,11 @@ export interface Manifestacao {
   analise?: AnaliseStatus         // 'nao_analisada' por padrão
   analise_por?: string | null
   analise_em?: string | null
+  // -------- Avaliação da RESPOSTA pelo autor (0 a 5 estrelas) --------
+  // Sobre a resposta de Gente e Cultura, não sobre o assunto original.
+  avaliacao?: number | null       // 1 a 5; ausente = ainda não avaliou
+  avaliacao_obs?: string | null   // observação opcional do autor
+  avaliacao_em?: string | null    // ISO da avaliação
 }
 
 export const TRIAGEM_LABEL: Record<Triagem, string> = {

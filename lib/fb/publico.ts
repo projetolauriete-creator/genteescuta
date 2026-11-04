@@ -266,6 +266,28 @@ export async function listarMinhasManifestacoes(): Promise<any[]> {
     .sort((a, b) => String(b.criado_em ?? '').localeCompare(String(a.criado_em ?? '')))
 }
 
+// O autor avalia a RESPOSTA recebida (0 a 5 estrelas + observação opcional).
+// É sobre a resposta de Gente e Cultura, não sobre o assunto original.
+// Pode reenviar para editar. As regras do Firestore só deixam o autor mexer
+// nos campos de avaliação.
+export async function avaliarManifestacao(
+  id: string,
+  nota: number,
+  observacao?: string,
+): Promise<{ ok: true }> {
+  const u = auth().currentUser
+  if (!u) throw new Error('Entre para avaliar a resposta.')
+  const n = Math.round(Number(nota))
+  if (!(n >= 1 && n <= 5)) throw new Error('Escolha de 1 a 5 estrelas.')
+  const obs = (observacao ?? '').trim()
+  await updateDoc(doc(db(), 'manifestacoes', id), {
+    avaliacao: n,
+    avaliacao_obs: obs || null,
+    avaliacao_em: new Date().toISOString(),
+  })
+  return { ok: true }
+}
+
 export async function excluirMinhaManifestacao(id: string): Promise<{ ok: true }> {
   const u = auth().currentUser
   if (!u) throw new Error('Entre para excluir a sua manifestação.')
