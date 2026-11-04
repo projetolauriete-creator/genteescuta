@@ -19,6 +19,7 @@
 // =============================================================
 const { onCall, HttpsError } = require('firebase-functions/v2/https')
 const { onDocumentCreated, onDocumentWritten } = require('firebase-functions/v2/firestore')
+const { onSchedule } = require('firebase-functions/v2/scheduler')
 const { setGlobalOptions } = require('firebase-functions/v2')
 const { logger } = require('firebase-functions')
 const admin = require('firebase-admin')
@@ -144,6 +145,14 @@ exports.emailDaNotificacao = onDocumentCreated(
     const snap = event.data
     if (!snap) return
     const n = snap.data() || {}
+
+    // O gestor passa a receber um RESUMO DIARIO (resumoDiarioGestor), entao o
+    // e-mail por solicitacao para o gestor fica desligado. Financeiro (f),
+    // colaborador (u:) e master (m) continuam recebendo normalmente.
+    if (String(n.alvo || '').startsWith('g:')) {
+      logger.info('alvo de gestor: e-mail por solicitacao desligado (usa resumo diario)')
+      return
+    }
 
     const cfg = await lerConfigEmail()
     if (!tipoLigado(cfg, n.tipo)) {
@@ -352,3 +361,134 @@ exports.testeEmail = onCall({ secrets: [SENDGRID_API_KEY] }, async (req) => {
   })
   return { ok: true, status }
 })
+
+// =============================================================
+// Resumo diário de reembolsos para o Gestor Aprovador.
+//
+// Substitui o e-mail por solicitação ao gestor (desligado no emailDaNotificacao):
+// uma vez por dia (08:00 America/Sao_Paulo), cada gestor com pedidos aguardando
+// a aprovação DELE recebe UM e-mail com a lista (solicitante, data, categoria),
+// só do(s) centro(s) de custo dele, sem valores. Quem não tem pendência não
+// recebe. Envio pelo SendGrid. Resultado gravado em config/resumo_reembolso.
+// =============================================================
+
+// Compara centros ignorando acento, caixa e "&" vs "e" (mesmo critério da tela).
+function chaveCentro(s) {
+  return String(s || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/&/g, ' e ').replace(/[^a-zA-Z0-9]+/g, ' ')
+    .trim().toLowerCase()
+}
+function mesmoCentro(a, b) { return !!chaveCentro(a) && chaveCentro(a) === chaveCentro(b) }
+
+function fmtData(iso) {
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return String(iso || '')
+  return d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+}
+
+// Interruptor próprio (config/resumo_reembolso.ativo). Sem o doc, fica LIGADO.
+async function resumoLigado() {
+  try {
+    const s = await dbA.doc('config/resumo_reembolso').get()
+    return !s.exists || s.data().ativo !== false
+  } catch (e) {
+    logger.error('config/resumo_reembolso ilegível', e)
+    return true
+  }
+}
+
+function montarHtmlResumo(itens) {
+  const linhas = itens.map((i) => `
+    <tr>
+      <td style="padding:8px 12px;border-bottom:1px solid #eef0f3;font-size:14px;color:#1a1714">${escapar(i.solicitante)}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #eef0f3;font-size:14px;color:#44474d;white-space:nowrap">${escapar(fmtData(i.data))}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #eef0f3;font-size:14px;color:#44474d">${escapar(i.categoria)}</td>
+    </tr>`).join('')
+  const href = SITE + '/reembolso'
+  const n = itens.length
+  return `<!doctype html><html lang="pt-BR"><body style="margin:0;background:#f4f5f7;padding:24px;font-family:Arial,Helvetica,sans-serif;color:#1a1714">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e7e8ec">
+      <tr><td style="background:#002443;padding:18px 24px;color:#ffffff;font-size:15px;font-weight:bold">Gente e Cultura</td></tr>
+      <tr><td style="padding:24px">
+        <h1 style="margin:0 0 6px;font-size:18px;color:#002443">Reembolsos aguardando sua aprovação</h1>
+        <p style="margin:0 0 18px;font-size:14px;color:#44474d">Você tem <strong>${n}</strong> ${n === 1 ? 'pedido' : 'pedidos'} na sua fila. Os valores ficam no portal, por segurança.</p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #eef0f3;border-radius:10px;overflow:hidden">
+          <tr style="background:#f7f8fa">
+            <th align="left" style="padding:8px 12px;font-size:12px;color:#8a8d93;text-transform:uppercase">Solicitante</th>
+            <th align="left" style="padding:8px 12px;font-size:12px;color:#8a8d93;text-transform:uppercase">Data</th>
+            <th align="left" style="padding:8px 12px;font-size:12px;color:#8a8d93;text-transform:uppercase">Categoria</th>
+          </tr>
+          ${linhas}
+        </table>
+        <p style="margin:20px 0 0"><a href="${href}" style="display:inline-block;background:#1a4895;color:#ffffff;text-decoration:none;font-size:14px;font-weight:bold;padding:11px 20px;border-radius:9px">Aprovar no portal</a></p>
+      </td></tr>
+      <tr><td style="padding:16px 24px;border-top:1px solid #eef0f3;font-size:12px;color:#8a8d93">
+        Resumo diário. Acesse ${SITE} para aprovar ou recusar.
+      </td></tr>
+    </table>
+  </td></tr></table>
+</body></html>`
+}
+
+function textoResumo(itens) {
+  const linhas = itens.map((i) => `- ${i.solicitante} · ${fmtData(i.data)} · ${i.categoria}`).join('\n')
+  return `Você tem ${itens.length} reembolso(s) aguardando aprovação.\n\n${linhas}\n\nAprove no portal: ${SITE}/reembolso`
+}
+
+// Rotina diária (08:00 America/Sao_Paulo): um resumo por gestor, só o centro dele.
+exports.resumoDiarioGestor = onSchedule(
+  { schedule: '0 8 * * *', timeZone: 'America/Sao_Paulo', secrets: [SENDGRID_API_KEY] },
+  async () => {
+    if (!(await resumoLigado())) {
+      logger.info('resumo diário desligado; nada enviado')
+      return
+    }
+
+    const snap = await dbA.collection('reembolsos').where('status', '==', 'pendente_gestor').get()
+    const pendentes = []
+    snap.forEach((d) => {
+      const r = d.data() || {}
+      pendentes.push({
+        centro: r.centro_custo || '',
+        solicitante: r.solicitante_nome || r.solicitante_email || 'Colaborador',
+        data: r.data_despesa || r.criado_em || '',
+        categoria: r.categoria || '',
+      })
+    })
+
+    const gestores = await porPapel('gestor') // [{ email, data }], só ativos com e-mail
+    let comPendencia = 0
+    let enviados = 0
+    let falhas = 0
+    for (const g of gestores) {
+      const centro = (g.data.centro_custo || '').trim()
+      const abrange = centro === TODOS_CENTROS
+      const meus = pendentes.filter((p) => abrange || mesmoCentro(p.centro, centro))
+      if (meus.length === 0) continue // sem pendência: não envia
+      comPendencia++
+      try {
+        await enviarEmail({
+          para: g.email,
+          assunto: `Reembolsos aguardando sua aprovação (${meus.length})`,
+          html: montarHtmlResumo(meus),
+          texto: textoResumo(meus),
+        })
+        enviados++
+      } catch (e) {
+        falhas++
+        logger.error(`resumo diário falhou para ${g.email}`, e)
+      }
+    }
+
+    logger.info(`resumo diário: ${comPendencia} gestores com pendência, ${enviados} enviados, ${falhas} falharam`)
+    await dbA.doc('config/resumo_reembolso').set({
+      ultima_execucao: new Date().toISOString(),
+      pendentes_total: pendentes.length,
+      gestores_com_pendencia: comPendencia,
+      enviados,
+      falhas,
+    }, { merge: true }).catch(() => {})
+  },
+)

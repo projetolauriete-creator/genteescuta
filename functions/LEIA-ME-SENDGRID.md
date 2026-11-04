@@ -11,6 +11,12 @@ Base entregue pela equipe do Rike; o disparo e o painel foram montados por cima.
     é criada, resolve o destinatário (`u:uid` / `g:centro` / `f` / `m`) nos mesmos
     e-mails do sino e envia. **Só envia quando o painel estiver ligado.**
   - `testeEmail({ para })`: envio de teste, só para administrador logado.
+  - `resumoDiarioGestor`: rotina agendada (08:00 America/Sao_Paulo). Um resumo
+    por Gestor Aprovador com os reembolsos aguardando a aprovação dele (só o
+    centro de custo dele, sem valores), link para o portal. Substitui o e-mail
+    por solicitação ao gestor: por isso o `emailDaNotificacao` ignora alvo `g:`.
+    Liga/desliga em `config/resumo_reembolso.ativo` (sem o doc, ligado); o
+    resultado de cada execução fica nesse mesmo doc.
 - Painel admin **Sistema > Disparo de e-mail** (`/admin/email`, só Super Admin):
   liga/desliga o disparo geral, liga/desliga por tipo de aviso e manda teste.
   O estado fica em `config/email` (`ativo`, `tipos`). Começa **desligado**.
