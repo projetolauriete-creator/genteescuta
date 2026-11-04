@@ -1,10 +1,59 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Save, Plus, KeyRound } from 'lucide-react'
 import { salvarConfig, adicionarArea } from '@/lib/fb/admin'
+import { getTaxaKm, salvarTaxaKm } from '@/lib/fb/reembolso'
+import { TAXA_KM_PADRAO } from '@/lib/reembolso'
 import { trocarSenha } from '@/lib/fb/auth'
 import { Aviso, Botao, Campo, ENTRADA } from '@/components/ui'
+
+export function FormReembolsoConfig() {
+  const [taxa, setTaxa] = useState('')
+  const [carregando, setCarregando] = useState(true)
+  const [erro, setErro] = useState<string | null>(null)
+  const [ok, setOk] = useState(false)
+  const [pendente, setPendente] = useState(false)
+
+  useEffect(() => {
+    getTaxaKm()
+      .then((t) => setTaxa(String(t).replace('.', ',')))
+      .catch(() => setTaxa(String(TAXA_KM_PADRAO).replace('.', ',')))
+      .finally(() => setCarregando(false))
+  }, [])
+
+  async function enviar(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setErro(null); setOk(false)
+    const t = Number(String(taxa).replace(/\./g, '').replace(',', '.'))
+    if (!(t > 0)) return setErro('Informe uma taxa por km maior que zero.')
+    setPendente(true)
+    try {
+      await salvarTaxaKm(t)
+      setOk(true)
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : 'Não consegui salvar.')
+    }
+    setPendente(false)
+  }
+
+  if (carregando) return <p className="text-sm text-tinta-3">Carregando…</p>
+
+  return (
+    <form onSubmit={enviar} className="space-y-4">
+      {erro && <Aviso tom="erro">{erro}</Aviso>}
+      {ok && <Aviso tom="sucesso">Taxa de KM salva.</Aviso>}
+      <Campo rotulo="Valor por km (R$)" ajuda="Usado no cálculo automático das despesas de KM: km x esta taxa. Vale para as novas solicitações.">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-tinta-3">R$</span>
+          <input inputMode="decimal" value={taxa} onChange={(e) => setTaxa(e.target.value)} placeholder="1,20" className={`${ENTRADA} max-w-[8rem]`} />
+          <span className="text-sm text-tinta-3">por km</span>
+        </div>
+      </Campo>
+      <Botao type="submit" disabled={pendente}><Save size={15} aria-hidden /> {pendente ? 'Salvando…' : 'Salvar'}</Botao>
+    </form>
+  )
+}
 
 export function FormEmpresa({ config }: { config: any }) {
   const [erro, setErro] = useState<string | null>(null)

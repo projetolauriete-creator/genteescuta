@@ -20,11 +20,13 @@ import {
 import {
   CATEGORIAS, STATUS_LABEL, STATUS_FAIXA, PAPEL_LABEL, CENTROS_CUSTO, TODOS_CENTROS,
   formatBRL, formatData, podeAprovar, statusEfetivo, ehEtapaFinanceiro, estaPendente, editavelPeloSolicitante,
+  ehCategoriaKm, valorKm, detalheKm, TAXA_KM_PADRAO,
   type StatusReembolso,
 } from '@/lib/reembolso'
 import {
   criarReembolso, prepararAnexo, listarMinhas, listarParaGestao,
   aprovarReembolso, recusarReembolso, registrarPagamento, getAnexo, editarReembolso, excluirReembolso, excluirReembolsoMaster,
+  getTaxaKm,
   type Reembolso, type Anexo,
 } from '@/lib/fb/reembolso'
 import type { Perfil } from '@/lib/fb/funcionarios'
@@ -320,15 +322,26 @@ function FormReembolso({ perfil, aoEnviar, setAviso, setErro }: {
   const [data, setData] = useState('')            // data da compra/gasto
   const [categoria, setCategoria] = useState('')
   const [valor, setValor] = useState('')
+  const [km, setKm] = useState('')               // só quando a categoria é KM
+  const [taxaKm, setTaxaKm] = useState(TAXA_KM_PADRAO)
   const [descricao, setDescricao] = useState('')
   const [arquivo, setArquivo] = useState<File | null>(null)
   const [pendente, setPendente] = useState(false)
 
+  // Taxa de KM configurada no admin (fonte única do cálculo).
+  useEffect(() => { getTaxaKm().then(setTaxaKm).catch(() => {}) }, [])
+
+  const ehKm = ehCategoriaKm(categoria)
   const valorNum = Number(String(valor).replace(/\./g, '').replace(',', '.'))
+  const kmNum = Number(String(km).replace(/\./g, '').replace(',', '.'))
+  // Em KM o valor é calculado (km x taxa); nas demais, é o valor digitado.
+  const valorEfetivo = ehKm ? valorKm(kmNum, taxaKm) : valorNum
   const erros = {
     data: !data ? 'Informe a data da compra/gasto.' : '',
     categoria: !categoria ? 'Escolha a categoria da despesa.' : '',
-    valor: !(valorNum > 0) ? 'Informe um valor maior que zero.' : '',
+    valor: ehKm
+      ? (!(kmNum > 0) ? 'Informe os quilômetros rodados.' : '')
+      : (!(valorNum > 0) ? 'Informe um valor maior que zero.' : ''),
     descricao: descricao.trim().length < 3 ? 'Descreva o motivo (mínimo 3 letras).' : '',
     arquivo: !arquivo ? 'Anexe o comprovante (imagem ou PDF).' : '',
   }
@@ -362,7 +375,11 @@ function FormReembolso({ perfil, aoEnviar, setAviso, setErro }: {
     setPendente(true)
     try {
       const anexo: Anexo = await prepararAnexo(arquivo!)
-      await criarReembolso({ centro_custo: centro, data_despesa: data, categoria, descricao, valor: valorNum }, anexo, perfil)
+      await criarReembolso({
+        centro_custo: centro, data_despesa: data, categoria, descricao,
+        valor: valorEfetivo,
+        ...(ehKm ? { km: kmNum, km_taxa: taxaKm } : {}),
+      }, anexo, perfil)
       aoEnviar()
     } catch (err) {
       setErro(err instanceof Error ? err.message : 'Não consegui enviar a solicitação.')
@@ -437,11 +454,29 @@ function FormReembolso({ perfil, aoEnviar, setAviso, setErro }: {
                 {tentou && <ErroCampo msg={erros.categoria} />}
               </div>
             </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-tinta">Valor (R$) <span className="text-critico">*</span></label>
-              <input inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="Ex.: 150,00" className={borda(erros.valor)} />
-              {tentou && <ErroCampo msg={erros.valor} />}
-            </div>
+            {ehKm ? (
+              <div className="space-y-2">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-tinta">Quilômetros rodados <span className="text-critico">*</span></label>
+                  <input inputMode="decimal" value={km} onChange={(e) => setKm(e.target.value)} placeholder="Ex.: 120" className={borda(erros.valor)} />
+                  {tentou && <ErroCampo msg={erros.valor} />}
+                </div>
+                <div className="rounded-lg border border-borda bg-superficie-2 px-3 py-2.5">
+                  <p className="text-[0.6875rem] font-semibold uppercase tracking-wide text-tinta-3">Valor do reembolso (calculado)</p>
+                  <p className="mt-0.5 flex items-center gap-2 text-tinta">
+                    <span className="text-lg font-[680]">{formatBRL(valorEfetivo)}</span>
+                    <span title="Calculado automaticamente, não editável"><Lock size={12} className="text-tinta-3" aria-hidden /></span>
+                  </p>
+                  <p className="mt-0.5 text-xs text-tinta-3">{detalheKm(kmNum, taxaKm, valorEfetivo)}</p>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label className="mb-1 block text-sm font-medium text-tinta">Valor (R$) <span className="text-critico">*</span></label>
+                <input inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="Ex.: 150,00" className={borda(erros.valor)} />
+                {tentou && <ErroCampo msg={erros.valor} />}
+              </div>
+            )}
           </div>
         )}
 
@@ -486,7 +521,8 @@ function FormReembolso({ perfil, aoEnviar, setAviso, setErro }: {
               <Resumo rotulo="Centro de custo" valor={centro || '-'} />
               <Resumo rotulo="Data da compra" valor={data ? fmtDataBR(data) : '-'} />
               <Resumo rotulo="Categoria" valor={categoria || '-'} />
-              <Resumo rotulo="Valor" valor={valorNum > 0 ? formatBRL(valorNum) : '-'} />
+              <Resumo rotulo="Valor" valor={valorEfetivo > 0 ? formatBRL(valorEfetivo) : '-'} />
+              {ehKm && <Resumo rotulo="Quilometragem" valor={kmNum > 0 ? detalheKm(kmNum, taxaKm, valorEfetivo) : '-'} />}
               <Resumo rotulo="Comprovante" valor={arquivo ? arquivo.name : '-'} />
               <div className="sm:col-span-2"><Resumo rotulo="Descrição" valor={descricao.trim() || '-'} /></div>
             </dl>
@@ -678,6 +714,11 @@ function CardReembolso({ r, onEditar, onExcluir, excluindo }: {
       {aberto && (
         <div className="border-t border-borda px-4 py-4">
           <p className="text-sm leading-6 text-tinta-2">{r.descricao}</p>
+          {r.km != null && (
+            <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-marca-clara px-2.5 py-1 text-xs font-semibold text-marca-texto">
+              Quilometragem: {detalheKm(r.km, r.km_taxa, r.valor)}
+            </p>
+          )}
           {recusa?.motivo && (
             <p className="mt-3 rounded-lg border border-[#f0c2c2] bg-[#fdeaea] px-3 py-2 text-sm text-[#8a1f1f]">
               <strong className="font-semibold">Motivo da recusa:</strong> {recusa.motivo}
@@ -771,24 +812,38 @@ function ModalEditar({ r, perfil, onFechar, aoSalvo }: {
   const [data, setData] = useState(String(r.data_despesa ?? '').slice(0, 10))
   const [categoria, setCategoria] = useState(r.categoria ?? '')
   const [valor, setValor] = useState(String(r.valor ?? '').replace('.', ','))
+  const [km, setKm] = useState(r.km != null ? String(r.km).replace('.', ',') : '')
+  const [taxaKm, setTaxaKm] = useState(r.km_taxa && r.km_taxa > 0 ? r.km_taxa : TAXA_KM_PADRAO)
   const [descricao, setDescricao] = useState(r.descricao ?? '')
   const [arquivo, setArquivo] = useState<File | null>(null)
   const [pendente, setPendente] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
   const recusa = [...(r.historico ?? [])].reverse().find((h) => h.status_novo === 'recusado')
 
+  // Taxa atual de KM (para recalcular se a pessoa mexer no km).
+  useEffect(() => { getTaxaKm().then(setTaxaKm).catch(() => {}) }, [])
+
+  const ehKm = ehCategoriaKm(categoria)
   const valorNum = Number(String(valor).replace(/\./g, '').replace(',', '.'))
+  const kmNum = Number(String(km).replace(/\./g, '').replace(',', '.'))
+  const valorEfetivo = ehKm ? valorKm(kmNum, taxaKm) : valorNum
 
   async function salvar() {
     setErro(null)
     if (!data) return setErro('Informe a data da compra/gasto.')
     if (!categoria) return setErro('Escolha a categoria.')
-    if (!(valorNum > 0)) return setErro('Informe um valor maior que zero.')
+    if (ehKm ? !(kmNum > 0) : !(valorNum > 0)) {
+      return setErro(ehKm ? 'Informe os quilômetros rodados.' : 'Informe um valor maior que zero.')
+    }
     if (descricao.trim().length < 3) return setErro('Descreva o motivo (mínimo 3 letras).')
     setPendente(true)
     try {
       const anexo = arquivo ? await prepararAnexo(arquivo) : null
-      await editarReembolso(r.id, { data_despesa: data, categoria, descricao, valor: valorNum }, perfil, anexo)
+      await editarReembolso(r.id, {
+        data_despesa: data, categoria, descricao,
+        valor: valorEfetivo,
+        ...(ehKm ? { km: kmNum, km_taxa: taxaKm } : {}),
+      }, perfil, anexo)
       aoSalvo('Reembolso ajustado e reenviado para aprovação.')
     } catch (e) {
       setErro(e instanceof Error ? e.message : 'Não consegui reenviar.')
@@ -828,10 +883,27 @@ function ModalEditar({ r, perfil, onFechar, aoSalvo }: {
               </select>
             </div>
           </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-tinta">Valor (R$)</label>
-            <input inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="Ex.: 150,00" className={ENTRADA} />
-          </div>
+          {ehKm ? (
+            <div className="space-y-2">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-tinta">Quilômetros rodados</label>
+                <input inputMode="decimal" value={km} onChange={(e) => setKm(e.target.value)} placeholder="Ex.: 120" className={ENTRADA} />
+              </div>
+              <div className="rounded-lg border border-borda bg-superficie-2 px-3 py-2.5">
+                <p className="text-[0.6875rem] font-semibold uppercase tracking-wide text-tinta-3">Valor do reembolso (calculado)</p>
+                <p className="mt-0.5 flex items-center gap-2 text-tinta">
+                  <span className="text-lg font-[680]">{formatBRL(valorEfetivo)}</span>
+                  <span title="Calculado automaticamente, não editável"><Lock size={12} className="text-tinta-3" aria-hidden /></span>
+                </p>
+                <p className="mt-0.5 text-xs text-tinta-3">{detalheKm(kmNum, taxaKm, valorEfetivo)}</p>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-tinta">Valor (R$)</label>
+              <input inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="Ex.: 150,00" className={ENTRADA} />
+            </div>
+          )}
           <div>
             <label className="mb-1 block text-sm font-medium text-tinta">Descrição</label>
             <textarea rows={3} value={descricao} onChange={(e) => setDescricao(e.target.value)} className={ENTRADA} />
@@ -1211,6 +1283,11 @@ function Envelope({ r, children, onFechar }: { r: Reembolso; children: React.Rea
           <button type="button" onClick={onFechar} className="rounded-lg p-1.5 text-tinta-3 hover:bg-superficie-2" aria-label="Fechar"><X size={18} aria-hidden /></button>
         </div>
         <p className="mt-3 text-sm leading-6 text-tinta-2">{r.descricao}</p>
+        {r.km != null && (
+          <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-marca-clara px-2.5 py-1 text-xs font-semibold text-marca-texto">
+            Quilometragem: {detalheKm(r.km, r.km_taxa, r.valor)}
+          </p>
+        )}
         <div className="mt-3"><BotaoAnexo id={r.id} tipo={r.anexo_tipo} /></div>
         {children}
         <Timeline r={r} />

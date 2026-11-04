@@ -10,12 +10,13 @@
 // consultam. A segurança de verdade está nas Regras do Firestore.
 // =============================================================
 import {
-  collection, doc, addDoc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where,
+  collection, doc, addDoc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, deleteField, query, where,
 } from 'firebase/firestore'
 import { db, auth } from '../firebase'
 import {
   statusInicial, proximoStatus, papelDaEtapa, mesmoCentro, centroAbrangeTudo, statusDoPagamento,
-  estaPendente, editavelPeloSolicitante, formatBRL, formatData, type StatusReembolso,
+  estaPendente, editavelPeloSolicitante, formatBRL, formatData,
+  ehCategoriaKm, valorKm, TAXA_KM_PADRAO, type StatusReembolso,
 } from '../reembolso'
 import type { Perfil } from './funcionarios'
 import { registrarLog } from './usuarios'
@@ -24,6 +25,48 @@ import { avisarNovaSolicitacao, avisarDecisao, avisarPagamento, avisarPendencia,
 // Limite do data URL do anexo. O documento do Firestore tem teto de ~1 MB;
 // base64 infla ~33%, então seguramos o conteúdo bem abaixo disso.
 const MAX_ANEXO_CHARS = 950_000
+
+// -------------------------------------------------------------
+// Taxa de KM (R$/km), configurável no admin (config/reembolso.taxa_km).
+// Fonte única: o formulário e o cálculo leem daqui.
+// -------------------------------------------------------------
+export async function getTaxaKm(): Promise<number> {
+  try {
+    const snap = await getDoc(doc(db(), 'config', 'reembolso'))
+    const t = snap.exists() ? Number(snap.data().taxa_km) : NaN
+    return t > 0 ? t : TAXA_KM_PADRAO
+  } catch {
+    return TAXA_KM_PADRAO
+  }
+}
+
+/** Salva a taxa de KM (só Super Admin, pelas Regras do Firestore). */
+export async function salvarTaxaKm(taxa: number): Promise<void> {
+  const t = Number(taxa)
+  if (!(t > 0)) throw new Error('Informe uma taxa por km maior que zero.')
+  await setDoc(
+    doc(db(), 'config', 'reembolso'),
+    { taxa_km: t, atualizado_em: new Date().toISOString() },
+    { merge: true },
+  )
+  await registrarLog('reembolso_taxa_km', `R$ ${t.toFixed(2)} por km`)
+}
+
+// Decide valor e campos de km a partir da categoria. Em KM o valor é sempre
+// calculado (km x taxa); nas demais, usa o valor digitado. Lança se inválido.
+function valorEKm(
+  dados: { categoria: string; valor: number; km?: number; km_taxa?: number },
+): { valor: number; km: number | null; km_taxa: number | null } {
+  if (ehCategoriaKm(dados.categoria)) {
+    const km = Number(dados.km)
+    const taxa = Number(dados.km_taxa) > 0 ? Number(dados.km_taxa) : TAXA_KM_PADRAO
+    if (!(km > 0)) throw new Error('Informe os quilômetros rodados (maior que zero).')
+    return { valor: valorKm(km, taxa), km, km_taxa: taxa }
+  }
+  const valor = Number(dados.valor)
+  if (!(valor > 0)) throw new Error('Informe um valor maior que zero.')
+  return { valor, km: null, km_taxa: null }
+}
 
 export interface Anexo {
   tipo: 'image' | 'pdf'
@@ -57,6 +100,10 @@ export interface Reembolso {
   descricao: string
   valor: number
   status: StatusReembolso
+  /** Quilometragem informada (só nas despesas de KM). */
+  km?: number | null
+  /** Taxa (R$/km) aplicada no cálculo, guardada para conferência. */
+  km_taxa?: number | null
   tem_anexo: boolean
   anexo_tipo: 'image' | 'pdf' | null
   anexo_nome: string | null
@@ -138,19 +185,24 @@ export async function criarReembolso(
     categoria: string
     descricao: string
     valor: number
+    /** Só nas despesas de KM: km rodados e a taxa aplicada. */
+    km?: number
+    km_taxa?: number
   },
   anexo: Anexo,
   perfil: Perfil,
 ) {
   const u = auth().currentUser
   if (!u) throw new Error('Entre para solicitar um reembolso.')
-  const valor = Number(dados.valor)
-  if (!(valor > 0)) throw new Error('Informe um valor maior que zero.')
   if (!dados.centro_custo) throw new Error('Selecione o centro de custo.')
   if (!dados.data_despesa) throw new Error('Informe a data da despesa.')
   if (!dados.categoria) throw new Error('Escolha a categoria da despesa.')
   if (String(dados.descricao ?? '').trim().length < 3) throw new Error('Descreva o motivo da despesa.')
   if (!anexo) throw new Error('Anexe o comprovante (foto ou PDF).')
+
+  // KM: o valor é calculado (km x taxa), nunca digitado à mão, para garantir o
+  // cálculo. Guarda km e a taxa aplicada para conferência posterior.
+  const campos = valorEKm(dados)
 
   const agora = new Date().toISOString()
   const status = statusInicial(perfil.papeis)
@@ -163,7 +215,8 @@ export async function criarReembolso(
     data_despesa: dados.data_despesa,
     categoria: dados.categoria,
     descricao: String(dados.descricao).trim(),
-    valor,
+    valor: campos.valor,
+    ...(campos.km != null ? { km: campos.km, km_taxa: campos.km_taxa } : {}),
     status,
     tem_anexo: true,
     anexo_tipo: anexo.tipo,
@@ -185,14 +238,14 @@ export async function criarReembolso(
     criado_em: agora,
   })
 
-  await registrarLog('reembolso_solicitado', `${dados.categoria} · ${valor}`)
+  await registrarLog('reembolso_solicitado', `${dados.categoria} · ${campos.valor}`)
   // Notifica (sino) o gestor da área / master e o financeiro. Best-effort.
   await avisarNovaSolicitacao({
     reembolsoId: ref.id,
     status,
     centro: dados.centro_custo,
     solicitante: perfil.nome || u.email || 'Colaborador',
-    resumo: `${dados.categoria} · ${formatBRL(valor)}`,
+    resumo: `${dados.categoria} · ${formatBRL(campos.valor)}`,
   })
   return { id: ref.id, status }
 }
@@ -400,18 +453,18 @@ function resumirAlteracoes(
 
 export async function editarReembolso(
   id: string,
-  dados: { data_despesa: string; categoria: string; descricao: string; valor: number },
+  dados: { data_despesa: string; categoria: string; descricao: string; valor: number; km?: number; km_taxa?: number },
   perfil: Perfil,
   anexo?: Anexo | null,
 ) {
   const u = auth().currentUser
   if (!u) throw new Error('Sua sessão expirou. Entre novamente.')
 
-  const valor = Number(dados.valor)
-  if (!(valor > 0)) throw new Error('Informe um valor maior que zero.')
   if (!dados.data_despesa) throw new Error('Informe a data da despesa.')
   if (!dados.categoria) throw new Error('Escolha a categoria da despesa.')
   if (String(dados.descricao ?? '').trim().length < 3) throw new Error('Descreva o motivo da despesa.')
+  const campos = valorEKm(dados)
+  const valor = campos.valor
 
   const ref = doc(db(), 'reembolsos', id)
   const snap = await getDoc(ref)
@@ -458,6 +511,9 @@ export async function editarReembolso(
     categoria: dados.categoria,
     descricao: String(dados.descricao).trim(),
     valor,
+    // KM: guarda km + taxa; trocando para outra categoria, limpa os dois.
+    km: campos.km != null ? campos.km : deleteField(),
+    km_taxa: campos.km != null ? campos.km_taxa : deleteField(),
     historico: [...(r.historico ?? []), evento],
     atualizado_em: agora,
   }

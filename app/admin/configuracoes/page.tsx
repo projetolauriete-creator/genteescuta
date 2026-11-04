@@ -5,7 +5,7 @@ import { X, RotateCcw, ShieldCheck } from 'lucide-react'
 import { configCompleta, definirAreaAtiva } from '@/lib/fb/admin'
 import { minhaConta, type Conta } from '@/lib/fb/usuarios'
 import { CabecalhoPagina, Cartao, Aviso } from '@/components/ui'
-import { FormEmpresa, FormNovaArea, FormMinhaSenha } from '@/components/FormConfig'
+import { FormEmpresa, FormNovaArea, FormMinhaSenha, FormReembolsoConfig } from '@/components/FormConfig'
 
 export default function Configuracoes() {
   const [eu, setEu] = useState<Conta | null | undefined>(undefined)
@@ -87,6 +87,10 @@ export default function Configuracoes() {
               </div>
             </div>
           )}
+        </Cartao>
+
+        <Cartao titulo="Reembolso" apoio="Taxa por quilômetro usada no cálculo automático das despesas de KM.">
+          <FormReembolsoConfig />
         </Cartao>
 
         <Cartao titulo="Minha senha" apoio="Troque a senha provisória. Depois de trocar, use a nova para entrar.">

@@ -221,3 +221,33 @@ export function formatData(iso?: string | null): string {
   if (Number.isNaN(d.getTime())) return String(iso)
   return d.toLocaleDateString('pt-BR')
 }
+
+// -------- Quilometragem (KM) --------
+// Despesas de KM nao tem valor digitado: o valor e km x taxa (R$/km). A taxa e
+// configuravel no admin (config/reembolso.taxa_km); este e o padrao de fallback.
+export const TAXA_KM_PADRAO = 1.2
+
+/** A categoria e a de quilometragem (calculo automatico km x taxa)? */
+export function ehCategoriaKm(categoria?: string | null): boolean {
+  return (categoria ?? '').trim().toUpperCase() === 'KM'
+}
+
+/** Valor do reembolso de KM: km x taxa, arredondado a centavos. */
+export function valorKm(km: number, taxa: number): number {
+  const k = Number(km) || 0
+  const t = Number(taxa) || 0
+  return Math.round(k * t * 100) / 100
+}
+
+/** Numero de km em pt-BR (ate 1 casa, sem forcar decimais). */
+export function formatKm(km?: number | null): string {
+  const k = Number(km) || 0
+  return k.toLocaleString('pt-BR', { maximumFractionDigits: 1 })
+}
+
+/** Linha de conferencia: "120 km x R$ 1,20 = R$ 144,00". */
+export function detalheKm(km?: number | null, taxa?: number | null, valor?: number | null): string {
+  const t = Number(taxa) || TAXA_KM_PADRAO
+  const v = valor != null ? Number(valor) : valorKm(Number(km) || 0, t)
+  return `${formatKm(km)} km x ${formatBRL(t)} = ${formatBRL(v)}`
+}

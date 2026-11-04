@@ -306,7 +306,7 @@ service cloud.firestore {
           && request.resource.data.valor > 0
           && request.resource.data.status in ['pendente_gestor', 'pendente_master', 'pendente_financeiro']
           && request.resource.data.diff(resource.data).affectedKeys()
-               .hasOnly(['status', 'historico', 'atualizado_em', 'data_despesa', 'categoria', 'descricao', 'valor', 'tem_anexo', 'anexo_tipo', 'anexo_nome']);
+               .hasOnly(['status', 'historico', 'atualizado_em', 'data_despesa', 'categoria', 'descricao', 'valor', 'km', 'km_taxa', 'tem_anexo', 'anexo_tipo', 'anexo_nome']);
       }
 
       // Atualização = decisão de aprovação/recusa (gestor/master) OU registro
