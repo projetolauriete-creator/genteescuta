@@ -150,27 +150,30 @@ export default function HumorEquipe() {
     if (inputRef.current) inputRef.current.value = ''
   }
 
-  async function limparMesAtual() {
-    const d = new Date()
-    const mesAtual = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    const rotulo = rotuloMes(mesAtual).toLowerCase()
-    const noMes = registros.filter((r) => String(r.dia || '').startsWith(mesAtual)).length
+  // Apaga o MÊS selecionado no filtro Período (não o mês atual do calendário).
+  // Só faz sentido com um mês escolhido; em "Geral" o botão fica desabilitado.
+  async function limparMesSelecionado() {
+    if (periodoAtual === 'geral') return
+    const mes = periodoAtual
+    const rotulo = rotuloMes(mes)
+    const noMes = registros.filter((r) => String(r.dia || '').startsWith(mes)).length
 
     if (noMes === 0) {
       setErro(null)
-      setAviso(`Não há registros de humor de ${rotulo} para apagar. Os meses anteriores foram mantidos.`)
+      setAviso(`Não há registros de humor de ${rotulo} para apagar. Os outros meses foram mantidos.`)
       return
     }
     const plural = noMes === 1 ? 'registro' : 'registros'
-    if (!confirm(`Isso vai apagar os ${noMes} ${plural} de humor de ${rotulo}. Os meses anteriores serão mantidos. Deseja continuar?`)) return
+    if (!confirm(`Isso vai apagar os ${noMes} ${plural} de ${rotulo}. Os outros meses serão mantidos. Continuar?`)) return
 
     setErro(null)
     setAviso(null)
     setLimpando(true)
     try {
-      const n = await limparRegistrosHumorMes(mesAtual)
-      setRegistros((prev) => prev.filter((r) => !String(r.dia || '').startsWith(mesAtual)))
-      setAviso(`Pronto: ${n} ${n === 1 ? 'registro apagado' : 'registros apagados'} de ${rotulo}. Os meses anteriores foram mantidos.`)
+      const n = await limparRegistrosHumorMes(mes)
+      setRegistros((prev) => prev.filter((r) => !String(r.dia || '').startsWith(mes)))
+      setPeriodo('geral') // o mês apagado deixa de existir; volta para a visão geral
+      setAviso(`Pronto: ${n} ${n === 1 ? 'registro apagado' : 'registros apagados'} de ${rotulo}. Os outros meses foram mantidos.`)
     } catch {
       setErro('Não consegui limpar os registros do mês.')
     }
@@ -378,12 +381,16 @@ export default function HumorEquipe() {
               {botaoImportar}
               <button
                 type="button"
-                onClick={limparMesAtual}
-                disabled={limpando}
-                title="Apaga só os registros do mês atual; os meses anteriores são mantidos."
-                className="inline-flex items-center gap-1.5 rounded-lg border border-borda-forte bg-white px-3.5 py-2 text-sm font-medium text-tinta transition-colors hover:border-[#e2b4b4] hover:bg-plano hover:text-critico disabled:opacity-60"
+                onClick={limparMesSelecionado}
+                disabled={limpando || periodoAtual === 'geral'}
+                title={periodoAtual === 'geral'
+                  ? 'Escolha um mês no filtro Período para poder limpar.'
+                  : `Apaga só os registros de ${rotuloMes(periodoAtual)}; os outros meses são mantidos.`}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-borda-forte bg-white px-3.5 py-2 text-sm font-medium text-tinta transition-colors hover:border-[#e2b4b4] hover:bg-plano hover:text-critico disabled:opacity-60 disabled:hover:border-borda-forte disabled:hover:bg-white disabled:hover:text-tinta"
               >
-                <Trash2 size={15} aria-hidden /> {limpando ? 'Limpando…' : 'Limpar mês atual'}
+                <Trash2 size={15} aria-hidden /> {limpando
+                  ? 'Limpando…'
+                  : periodoAtual === 'geral' ? 'Limpar mês selecionado' : `Limpar ${rotuloMes(periodoAtual)}`}
               </button>
             </>
           ) : undefined
