@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { UserPlus, Search, KeyRound, Power, Trash2, Users, SlidersHorizontal, X, ShieldCheck } from 'lucide-react'
+import { UserPlus, Search, KeyRound, Power, Trash2, Users, SlidersHorizontal, X, ShieldCheck, ChevronLeft, ChevronRight } from 'lucide-react'
 import {
   minhaConta, ehGerente, SENHA_PADRAO, type Conta,
   listarUsuarios, cadastrarUsuario, reenviarSenha, definirAtivo, alterarNivel, excluirUsuario,
@@ -32,6 +32,59 @@ const PAPEIS_COM_MENU = ['master']
 // "gente_cultura" = acesso ao canal restrito do Protocolo de Assédio (só isso).
 const PAPEIS_FUNC = ['master', 'gestor', 'financeiro', 'gente_cultura'] as const
 
+// Quantas pessoas por página na lista "Pessoas e acessos".
+const POR_PAGINA = 20
+
+// Opções do filtro de papel (rótulos visíveis à esquerda, chave à direita).
+const OPC_PAPEL = [
+  { chave: 'todos', rotulo: 'Todos os papéis' },
+  { chave: 'colaborador', rotulo: 'Colaborador' },
+  { chave: 'gestor', rotulo: 'Gestor Aprovador' },
+  { chave: 'financeiro', rotulo: 'Financeiro' },
+  { chave: 'master', rotulo: 'Master Administrador' },
+] as const
+type FiltroPapel = (typeof OPC_PAPEL)[number]['chave']
+
+// Papéis "elevados" de uma linha (admin do sistema conta como master). Normaliza
+// o papel legado "administrador" para "master".
+function papeisDaLinha(u: any): Set<string> {
+  const s = new Set<string>()
+  if (u._origem === 'admins') s.add('master')
+  for (const p of Array.isArray(u.papeis) ? u.papeis : []) {
+    s.add(p === 'administrador' ? 'master' : p)
+  }
+  return s
+}
+
+// A linha bate com o filtro de papel escolhido?
+function casaPapel(u: any, f: FiltroPapel): boolean {
+  if (f === 'todos') return true
+  const papeis = papeisDaLinha(u)
+  if (f === 'colaborador') {
+    // Mostra como "Colaborador" quem não acumula nenhum papel elevado nem é
+    // admin do sistema (espelha o chip exibido na coluna Acesso).
+    if (u._origem === 'admins') return false
+    return !['master', 'gestor', 'financeiro', 'gente_cultura'].some((p) => papeis.has(p))
+  }
+  return papeis.has(f)
+}
+
+// Lista de "tokens" de página para o rodapé: números com reticências em volta
+// da página atual, sem ficar enorme quando há muitas páginas.
+function paginasVisiveis(atual: number, total: number): (number | '…')[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+  const toks = new Set<number>([1, 2, total - 1, total, atual - 1, atual, atual + 1])
+  const ordenadas = [...toks].filter((n) => n >= 1 && n <= total).sort((a, b) => a - b)
+  const saida: (number | '…')[] = []
+  let anterior = 0
+  for (const n of ordenadas) {
+    if (anterior && n - anterior > 1) saida.push('…')
+    saida.push(n)
+    anterior = n
+  }
+  return saida
+}
+
 function pad2(n: number) { return String(n).padStart(2, '0') }
 
 /** Converte os campos de data digitados em DadosPessoais; lança se inválido. */
@@ -57,6 +110,10 @@ export default function Funcionarios() {
   const [admins, setAdmins] = useState<any[]>([])
   const [carregando, setCarregando] = useState(true)
   const [busca, setBusca] = useState('')
+  const [fStatus, setFStatus] = useState<'todos' | 'ativos' | 'inativos'>('todos')
+  const [fPapel, setFPapel] = useState<FiltroPapel>('todos')
+  const [fCentro, setFCentro] = useState<string>('todos')
+  const [pagina, setPagina] = useState(1)
   const [aviso, setAviso] = useState<string | null>(null)
   const [erro, setErro] = useState<string | null>(null)
   const [editando, setEditando] = useState<any | null>(null)
@@ -83,18 +140,48 @@ export default function Funcionarios() {
   const souGerente = ehGerente(eu ?? null)
 
   // Junta funcionários + administradores do sistema (Master/Super) numa lista só,
-  // ordenada por e-mail. `_origem` diz de qual coleção cada linha veio.
+  // em ordem alfabética por NOME (cai no e-mail quando não há nome).
+  // `_origem` diz de qual coleção cada linha veio.
   const todos = useMemo(() => {
     const f = lista.map((u) => ({ ...u, _origem: 'funcionarios' as const }))
     const a = admins.map((u) => ({ ...u, _origem: 'admins' as const }))
-    return [...f, ...a].sort((x, y) => (x.email ?? '').localeCompare(y.email ?? ''))
+    return [...f, ...a].sort((x, y) =>
+      (x.nome || x.email || '').localeCompare(y.nome || y.email || '', 'pt-BR', { sensitivity: 'base' }),
+    )
   }, [lista, admins])
 
+  // Centros de custo que aparecem no filtro: a lista canônica oficial mais, se
+  // houver, o valor especial "Todos os centros de custo" usado por gestores globais.
+  const centrosFiltro = useMemo(() => {
+    const extra = todos.some((u) => (u.centro_custo || '').trim() === TODOS_CENTROS) ? [TODOS_CENTROS] : []
+    return [...CENTROS_CUSTO, ...extra]
+  }, [todos])
+
+  // Busca + Status + Papel + Centro de custo, todos combinados entre si.
   const filtrados = useMemo(() => {
     const q = busca.trim().toLowerCase()
-    if (!q) return todos
-    return todos.filter((u) => `${u.nome ?? ''} ${u.email ?? ''}`.toLowerCase().includes(q))
-  }, [todos, busca])
+    return todos.filter((u) => {
+      if (q && !`${u.nome ?? ''} ${u.email ?? ''}`.toLowerCase().includes(q)) return false
+      if (fStatus === 'ativos' && u.ativo === false) return false
+      if (fStatus === 'inativos' && u.ativo !== false) return false
+      if (!casaPapel(u, fPapel)) return false
+      if (fCentro !== 'todos' && (u.centro_custo || '').trim() !== fCentro) return false
+      return true
+    })
+  }, [todos, busca, fStatus, fPapel, fCentro])
+
+  // Paginação: 20 por página. A contagem e as páginas se recalculam conforme o
+  // resultado; a página atual nunca passa do total existente para o filtro.
+  const totalPaginas = Math.max(1, Math.ceil(filtrados.length / POR_PAGINA))
+  const paginaAtual = Math.min(pagina, totalPaginas)
+  const inicio = (paginaAtual - 1) * POR_PAGINA
+  const visiveis = filtrados.slice(inicio, inicio + POR_PAGINA)
+  const de = filtrados.length === 0 ? 0 : inicio + 1
+  const ate = Math.min(inicio + POR_PAGINA, filtrados.length)
+
+  // Ao mudar busca ou qualquer filtro, volta para a primeira página.
+  useEffect(() => { setPagina(1) }, [busca, fStatus, fPapel, fCentro])
+  const filtroAtivo = busca.trim() !== '' || fStatus !== 'todos' || fPapel !== 'todos' || fCentro !== 'todos'
 
   const [corrigindo, setCorrigindo] = useState(false)
   async function migrarAdmins() {
@@ -205,11 +292,56 @@ export default function Funcionarios() {
           }
           padding={false}
         >
+          <div className="flex flex-wrap items-end gap-2.5 border-b border-borda px-3 py-3 sm:px-4">
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-tinta-3">Status</span>
+              <select
+                value={fStatus}
+                onChange={(e) => setFStatus(e.target.value as typeof fStatus)}
+                className="rounded-lg border border-borda-forte bg-white px-2.5 py-1.5 text-sm text-tinta focus:border-marca focus:outline-none"
+              >
+                <option value="todos">Todos</option>
+                <option value="ativos">Ativos</option>
+                <option value="inativos">Inativos</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-tinta-3">Papel</span>
+              <select
+                value={fPapel}
+                onChange={(e) => setFPapel(e.target.value as FiltroPapel)}
+                className="rounded-lg border border-borda-forte bg-white px-2.5 py-1.5 text-sm text-tinta focus:border-marca focus:outline-none"
+              >
+                {OPC_PAPEL.map((o) => <option key={o.chave} value={o.chave}>{o.rotulo}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-tinta-3">Centro de custo</span>
+              <select
+                value={fCentro}
+                onChange={(e) => setFCentro(e.target.value)}
+                className="max-w-[16rem] rounded-lg border border-borda-forte bg-white px-2.5 py-1.5 text-sm text-tinta focus:border-marca focus:outline-none"
+              >
+                <option value="todos">Todos</option>
+                {centrosFiltro.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+            {filtroAtivo && (
+              <button
+                type="button"
+                onClick={() => { setBusca(''); setFStatus('todos'); setFPapel('todos'); setFCentro('todos') }}
+                className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-tinta-3 transition-colors hover:text-marca"
+              >
+                <X size={14} aria-hidden /> Limpar filtros
+              </button>
+            )}
+          </div>
+
           {carregando ? (
             <p className="p-4 text-sm text-tinta-3">Carregando…</p>
           ) : filtrados.length === 0 ? (
             <p className="p-4 text-sm text-tinta-3">
-              {todos.length === 0 ? 'Ninguém cadastrado ainda.' : 'Nenhum resultado para a busca.'}
+              {todos.length === 0 ? 'Ninguém cadastrado ainda.' : 'Nenhum resultado para os filtros.'}
             </p>
           ) : (
             <div className="overflow-x-auto">
@@ -223,7 +355,7 @@ export default function Funcionarios() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-borda">
-                  {filtrados.map((u) => {
+                  {visiveis.map((u) => {
                     const ehAdminSistema = u._origem === 'admins'
                     const mexivel = u.uid !== eu?.uid
                     const temMenu = ehAdminSistema || (Array.isArray(u.papeis) && u.papeis.some((p: string) => PAPEIS_COM_MENU.includes(p)))
@@ -340,6 +472,55 @@ export default function Funcionarios() {
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {!carregando && filtrados.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-borda px-3 py-3 sm:px-4">
+              <span className="text-xs text-tinta-3">
+                Mostrando <strong className="font-semibold text-tinta-2">{de}</strong> a{' '}
+                <strong className="font-semibold text-tinta-2">{ate}</strong> de{' '}
+                <strong className="font-semibold text-tinta-2">{filtrados.length}</strong>
+              </span>
+              {totalPaginas > 1 && (
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setPagina((p) => Math.max(1, p - 1))}
+                    disabled={paginaAtual <= 1}
+                    className="inline-flex items-center gap-1 rounded-lg border border-borda-forte bg-white px-2.5 py-1.5 text-sm text-tinta transition-colors hover:border-marca hover:text-marca disabled:opacity-40 disabled:hover:border-borda-forte disabled:hover:text-tinta"
+                  >
+                    <ChevronLeft size={15} aria-hidden /> <span className="hidden sm:inline">Anterior</span>
+                  </button>
+                  {paginasVisiveis(paginaAtual, totalPaginas).map((t, i) =>
+                    t === '…' ? (
+                      <span key={`e${i}`} className="px-1.5 text-sm text-tinta-3">…</span>
+                    ) : (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setPagina(t)}
+                        aria-current={t === paginaAtual ? 'page' : undefined}
+                        className={`min-w-[2rem] rounded-lg border px-2 py-1.5 text-sm font-medium transition-colors ${
+                          t === paginaAtual
+                            ? 'border-marca bg-marca-clara text-marca-texto'
+                            : 'border-borda-forte bg-white text-tinta hover:border-marca hover:text-marca'
+                        }`}
+                      >
+                        {t}
+                      </button>
+                    ),
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
+                    disabled={paginaAtual >= totalPaginas}
+                    className="inline-flex items-center gap-1 rounded-lg border border-borda-forte bg-white px-2.5 py-1.5 text-sm text-tinta transition-colors hover:border-marca hover:text-marca disabled:opacity-40 disabled:hover:border-borda-forte disabled:hover:text-tinta"
+                  >
+                    <span className="hidden sm:inline">Próxima</span> <ChevronRight size={15} aria-hidden />
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </Cartao>
