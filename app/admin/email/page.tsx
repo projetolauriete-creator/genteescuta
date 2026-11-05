@@ -1,13 +1,14 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Mail, Send, Power, Save, Loader2, Info, CheckCircle2, TriangleAlert } from 'lucide-react'
+import { Mail, Send, Power, Save, Loader2, Info, CheckCircle2, TriangleAlert, Receipt, Megaphone, HeartPulse } from 'lucide-react'
 import { minhaConta, type Conta } from '@/lib/fb/usuarios'
 import {
   getConfigEmail,
   salvarConfigEmail,
   enviarEmailTeste,
-  TIPOS_EMAIL,
+  CONFIG_EMAIL_PADRAO,
+  type ConfigEmail,
 } from '@/lib/fb/email'
 import { CabecalhoPagina, Cartao, Campo, ENTRADA, Botao, Aviso } from '@/components/ui'
 
@@ -40,10 +41,41 @@ function Interruptor({
   )
 }
 
+// Campo de hora (0 a 23), mostrado como "10h".
+function HoraInput({
+  valor,
+  aoMudar,
+  desabilitado,
+  rotuloAria,
+}: {
+  valor: number
+  aoMudar: (v: number) => void
+  desabilitado?: boolean
+  rotuloAria: string
+}) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <input
+        type="number"
+        min={0}
+        max={23}
+        value={valor}
+        disabled={desabilitado}
+        aria-label={rotuloAria}
+        onChange={(e) => {
+          const n = Math.max(0, Math.min(23, Math.floor(Number(e.target.value) || 0)))
+          aoMudar(n)
+        }}
+        className="w-16 rounded-lg border border-borda-forte bg-white px-2 py-1 text-sm text-tinta tabular focus:border-marca focus:outline-none disabled:opacity-40"
+      />
+      <span className="text-xs text-tinta-3">h</span>
+    </span>
+  )
+}
+
 export default function AdminEmail() {
   const [eu, setEu] = useState<Conta | null | undefined>(undefined)
-  const [ativo, setAtivo] = useState(false)
-  const [tipos, setTipos] = useState<Record<string, boolean>>({})
+  const [cfg, setCfg] = useState<ConfigEmail | null>(null)
   const [carregando, setCarregando] = useState(true)
   const [salvando, setSalvando] = useState(false)
   const [aviso, setAviso] = useState<string | null>(null)
@@ -59,22 +91,34 @@ export default function AdminEmail() {
     minhaConta().then(setEu).catch(() => setEu(null))
     getConfigEmail()
       .then((c) => {
-        setAtivo(c.ativo)
-        setTipos(c.tipos)
+        setCfg(c)
         setAtualizado({ em: c.atualizado_em, por: c.atualizado_por })
       })
-      .catch(() => {})
+      .catch(() => setCfg(CONFIG_EMAIL_PADRAO))
       .finally(() => setCarregando(false))
   }, [])
 
   const souSuper = !!eu?.ativo && eu?.nivel === 'super'
+  const ativo = !!cfg?.ativo
+
+  // Atualiza o rascunho de configuração de forma imutável.
+  function patch(mut: (c: ConfigEmail) => void) {
+    setCfg((c) => {
+      if (!c) return c
+      const n: ConfigEmail = JSON.parse(JSON.stringify(c))
+      mut(n)
+      return n
+    })
+  }
 
   async function salvar() {
+    if (!cfg) return
     setSalvando(true); setErro(null); setAviso(null)
     try {
-      await salvarConfigEmail({ ativo, tipos })
+      await salvarConfigEmail(cfg)
       setAviso('Configuração salva.')
       const c = await getConfigEmail()
+      setCfg(c)
       setAtualizado({ em: c.atualizado_em, por: c.atualizado_por })
     } catch (e) {
       setErro(e instanceof Error ? e.message : 'Não consegui salvar.')
@@ -117,11 +161,13 @@ export default function AdminEmail() {
     )
   }
 
+  const fin = cfg?.reembolso.financeiro
+
   return (
     <>
       <CabecalhoPagina
         titulo="Disparo de e-mail"
-        descricao="Envia por e-mail os mesmos avisos do sino. Comece desligado e ligue quando quiser."
+        descricao="Central única das notificações por e-mail do portal. O que está aqui é o que acontece de verdade."
       />
 
       <div className="max-w-3xl space-y-4 p-4 sm:p-6">
@@ -133,10 +179,10 @@ export default function AdminEmail() {
           O envio roda nas Cloud Functions, que exigem o plano <strong>Blaze</strong> no Firebase e o deploy das funções
           (<code className="rounded bg-white/60 px-1 text-[0.8em]">firebase deploy --only functions</code>), com a chave do
           SendGrid guardada no cofre. Enquanto isso não estiver pronto, pode deixar tudo configurado aqui: nada é enviado
-          até o interruptor abaixo ser ligado.
+          até o interruptor geral abaixo ser ligado.
         </Aviso>
 
-        {carregando ? (
+        {carregando || !cfg ? (
           <p className="text-sm text-tinta-3">Carregando configuração…</p>
         ) : (
           <>
@@ -150,41 +196,107 @@ export default function AdminEmail() {
                   <p className="text-sm font-semibold text-tinta">Disparo de e-mail ativo</p>
                   <p className="mt-0.5 text-sm text-tinta-3">
                     {ativo
-                      ? 'Os avisos ligados abaixo serão enviados por e-mail (quando as functions estiverem no ar).'
-                      : 'Nenhum e-mail é enviado. Os avisos continuam só no sino do portal.'}
+                      ? 'Os itens ligados abaixo são enviados (quando as functions estiverem no ar). Desligar aqui para tudo de uma vez.'
+                      : 'Nenhum e-mail é enviado, nem os resumos, nem o mural, nem o clima. Os avisos continuam só no sino do portal.'}
                   </p>
                 </div>
-                <Interruptor ligado={ativo} aoMudar={setAtivo} rotuloAria="Ativar o disparo de e-mail" />
+                <Interruptor ligado={ativo} aoMudar={(v) => patch((c) => { c.ativo = v })} rotuloAria="Ativar o disparo de e-mail" />
               </div>
             </Cartao>
 
-            {/* Tipos de aviso */}
-            <Cartao titulo="Quais avisos viram e-mail" apoio="Mesmos avisos do sino. Desligue os que não quiser enviar.">
-              <div className="divide-y divide-borda">
-                {TIPOS_EMAIL.map((t) => {
-                  const on = tipos[t.id] !== false
-                  return (
-                    <div key={t.id} className={`flex items-start gap-4 py-3 ${ativo ? '' : 'opacity-60'}`}>
+            {/* Grupo 1: Reembolso */}
+            <Cartao titulo="Reembolso" apoio="Resumos agendados por papel (fuso de São Paulo) e os avisos ao colaborador.">
+              <div className={`divide-y divide-borda ${ativo ? '' : 'opacity-60'}`}>
+                {/* Gestor */}
+                <div className="flex items-start gap-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-tinta">Gestor Aprovador</p>
+                    <p className="mt-0.5 text-xs leading-5 text-tinta-3">Resumo 1x por dia das pendências de aprovação da área dele. Sem pendência, não envia.</p>
+                  </div>
+                  <div className="flex flex-none items-center gap-3">
+                    <HoraInput valor={cfg.reembolso.gestor.hora} desabilitado={!ativo} aoMudar={(v) => patch((c) => { c.reembolso.gestor.hora = v })} rotuloAria="Horário do resumo do gestor" />
+                    <Interruptor ligado={cfg.reembolso.gestor.on} desabilitado={!ativo} aoMudar={(v) => patch((c) => { c.reembolso.gestor.on = v })} rotuloAria="Resumo do gestor" />
+                  </div>
+                </div>
+
+                {/* Master */}
+                <div className="flex items-start gap-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-tinta">Master Administrador</p>
+                    <p className="mt-0.5 text-xs leading-5 text-tinta-3">Resumo 1x por dia com todas as pendências de todas as áreas. Sem pendência, não envia.</p>
+                  </div>
+                  <div className="flex flex-none items-center gap-3">
+                    <HoraInput valor={cfg.reembolso.master.hora} desabilitado={!ativo} aoMudar={(v) => patch((c) => { c.reembolso.master.hora = v })} rotuloAria="Horário do resumo do master" />
+                    <Interruptor ligado={cfg.reembolso.master.on} desabilitado={!ativo} aoMudar={(v) => patch((c) => { c.reembolso.master.on = v })} rotuloAria="Resumo do master" />
+                  </div>
+                </div>
+
+                {/* Financeiro */}
+                <div className="flex items-start gap-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-tinta">Financeiro</p>
+                    <p className="mt-0.5 text-xs leading-5 text-tinta-3">Resumo 2x por dia dos reembolsos aprovados aguardando pagamento. Sem nada a pagar, não envia.</p>
+                  </div>
+                  <div className="flex flex-none items-center gap-3">
+                    <span className="inline-flex items-center gap-1">
+                      <HoraInput valor={fin!.horas[0] ?? 10} desabilitado={!ativo} aoMudar={(v) => patch((c) => { const h = [...c.reembolso.financeiro.horas]; h[0] = v; c.reembolso.financeiro.horas = h })} rotuloAria="Primeiro horário do financeiro" />
+                      <HoraInput valor={fin!.horas[1] ?? 15} desabilitado={!ativo} aoMudar={(v) => patch((c) => { const h = [...c.reembolso.financeiro.horas]; h[1] = v; c.reembolso.financeiro.horas = h })} rotuloAria="Segundo horário do financeiro" />
+                    </span>
+                    <Interruptor ligado={cfg.reembolso.financeiro.on} desabilitado={!ativo} aoMudar={(v) => patch((c) => { c.reembolso.financeiro.on = v })} rotuloAria="Resumo do financeiro" />
+                  </div>
+                </div>
+
+                {/* Colaborador */}
+                <div className="py-3">
+                  <p className="text-sm font-medium text-tinta">Colaborador</p>
+                  <p className="mt-0.5 text-xs leading-5 text-tinta-3">E-mail ao colaborador do pedido, no evento final. Os avisos intermediários ficam só no sino.</p>
+                  <div className="mt-2.5 space-y-2">
+                    <div className="flex items-center gap-4">
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-tinta">{t.titulo}</p>
-                        <p className="mt-0.5 text-xs leading-5 text-tinta-3">{t.desc}</p>
+                        <p className="text-sm text-tinta-2">Recusado (precisa de reajuste)</p>
                       </div>
-                      <Interruptor
-                        ligado={on}
-                        desabilitado={!ativo}
-                        aoMudar={(v) => setTipos((atual) => ({ ...atual, [t.id]: v }))}
-                        rotuloAria={`Enviar e-mail para: ${t.titulo}`}
-                      />
+                      <Interruptor ligado={cfg.reembolso.colaborador.recusado} desabilitado={!ativo} aoMudar={(v) => patch((c) => { c.reembolso.colaborador.recusado = v })} rotuloAria="Aviso de recusa ao colaborador" />
                     </div>
-                  )
-                })}
+                    <div className="flex items-center gap-4">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm text-tinta-2">Pago (inclui pagamento agendado)</p>
+                      </div>
+                      <Interruptor ligado={cfg.reembolso.colaborador.pago} desabilitado={!ativo} aoMudar={(v) => patch((c) => { c.reembolso.colaborador.pago = v })} rotuloAria="Aviso de pagamento ao colaborador" />
+                    </div>
+                  </div>
+                </div>
               </div>
-              {!ativo && (
-                <p className="mt-3 flex items-center gap-1.5 text-xs text-tinta-3">
-                  <Info size={13} aria-hidden /> Ligue o interruptor geral para habilitar os avisos individuais.
-                </p>
-              )}
             </Cartao>
+
+            {/* Grupo 2: Mural */}
+            <Cartao titulo="Mural">
+              <div className={`flex items-start gap-4 ${ativo ? '' : 'opacity-60'}`}>
+                <span className="flex h-9 w-9 flex-none items-center justify-center rounded-lg bg-marca-clara text-marca"><Megaphone size={17} aria-hidden /></span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-tinta">Aviso de nova publicação no mural</p>
+                  <p className="mt-0.5 text-xs leading-5 text-tinta-3">Quando um aviso do Gente Informa é publicado, envia e-mail para todos os colaboradores ativos. Cada pessoa recebe o seu (ninguém vê o e-mail do outro).</p>
+                </div>
+                <Interruptor ligado={cfg.mural.on} desabilitado={!ativo} aoMudar={(v) => patch((c) => { c.mural.on = v })} rotuloAria="Aviso de mural" />
+              </div>
+            </Cartao>
+
+            {/* Grupo 3: Pesquisa de Clima */}
+            <Cartao titulo="Pesquisa de Clima">
+              <div className={`flex items-start gap-4 ${ativo ? '' : 'opacity-60'}`}>
+                <span className="flex h-9 w-9 flex-none items-center justify-center rounded-lg bg-marca-clara text-marca"><HeartPulse size={17} aria-hidden /></span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-tinta">Aviso de nova pesquisa de clima</p>
+                  <p className="mt-0.5 text-xs leading-5 text-tinta-3">Quando uma nova pesquisa de clima é aberta, envia e-mail aos colaboradores avisando. Cada pessoa recebe o seu.</p>
+                </div>
+                <Interruptor ligado={cfg.clima.on} desabilitado={!ativo} aoMudar={(v) => patch((c) => { c.clima.on = v })} rotuloAria="Aviso de pesquisa de clima" />
+              </div>
+            </Cartao>
+
+            {!ativo && (
+              <p className="flex items-center gap-1.5 text-xs text-tinta-3">
+                <Info size={13} aria-hidden /> Ligue o interruptor geral para habilitar os itens acima.
+              </p>
+            )}
 
             <div className="flex flex-wrap items-center gap-3">
               <Botao type="button" onClick={salvar} disabled={salvando}>
@@ -196,6 +308,16 @@ export default function AdminEmail() {
                 </span>
               )}
             </div>
+
+            {/* Resumo do fluxo */}
+            <Cartao titulo="Quem recebe o quê e quando">
+              <ul className="space-y-2 text-sm leading-6 text-tinta-2">
+                <li className="flex gap-2"><Receipt size={16} className="mt-0.5 flex-none text-marca" aria-hidden /> Reembolso: o gestor e o master recebem um resumo 1x por dia; o financeiro, 2x por dia. Só quem tem pendência recebe. O colaborador recebe no evento final do pedido dele (recusa ou pagamento).</li>
+                <li className="flex gap-2"><Megaphone size={16} className="mt-0.5 flex-none text-marca" aria-hidden /> Mural: todos os colaboradores ativos são avisados quando sai uma nova publicação do Gente Informa.</li>
+                <li className="flex gap-2"><HeartPulse size={16} className="mt-0.5 flex-none text-marca" aria-hidden /> Clima: os colaboradores são avisados quando uma nova pesquisa de clima é aberta.</li>
+                <li className="flex gap-2"><Mail size={16} className="mt-0.5 flex-none text-marca" aria-hidden /> Remetente: Gente e Cultura (genteecultura@soulanrh.com.br). O corpo não leva valores nem dados sensíveis, só o essencial e o link do portal. Em envios a vários, ninguém vê o e-mail do outro.</li>
+              </ul>
+            </Cartao>
 
             {/* Teste de envio */}
             <Cartao
@@ -229,15 +351,6 @@ export default function AdminEmail() {
                   {testando ? <><Loader2 size={15} className="animate-spin" aria-hidden /> Enviando…</> : <><Send size={15} aria-hidden /> Enviar teste</>}
                 </Botao>
               </div>
-            </Cartao>
-
-            {/* Como funciona */}
-            <Cartao titulo="Como funciona">
-              <ul className="space-y-2 text-sm leading-6 text-tinta-2">
-                <li className="flex gap-2"><Mail size={16} className="mt-0.5 flex-none text-marca" aria-hidden /> O e-mail segue os mesmos destinatários do sino: o colaborador do pedido, o gestor da área, o financeiro ou o master, conforme o aviso.</li>
-                <li className="flex gap-2"><Mail size={16} className="mt-0.5 flex-none text-marca" aria-hidden /> Remetente: Gente e Cultura (genteecultura@soulanrh.com.br). A chave do SendGrid fica no cofre do Firebase, nunca no site.</li>
-                <li className="flex gap-2"><Mail size={16} className="mt-0.5 flex-none text-marca" aria-hidden /> Desligar aqui para imediatamente, sem precisar de novo deploy.</li>
-              </ul>
             </Cartao>
           </>
         )}

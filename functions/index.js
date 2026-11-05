@@ -36,27 +36,68 @@ const SITE = 'https://genteescuta.web.app'
 const TODOS_CENTROS = 'Todos os centros de custo'
 
 // -------------------------------------------------------------
-// Configuração do disparo (config/email). Sem o doc, tudo fica desligado.
+// Configuração central das notificações (config/email). Sem o doc, o envio
+// geral fica DESLIGADO (ativo=false) e cada item cai no seu padrão quando
+// ligado. Reembolso (gestor/master/financeiro + colaborador), Mural e Clima
+// saem todos daqui; o interruptor geral `ativo` desliga tudo.
 // -------------------------------------------------------------
+function horaOk(v, padrao) {
+  const n = Math.floor(Number(v))
+  return Number.isFinite(n) && n >= 0 && n <= 23 ? n : padrao
+}
+function horasOk(v, padrao) {
+  if (!Array.isArray(v)) return padrao.slice()
+  const limpas = Array.from(new Set(v.map((h) => Math.floor(Number(h))).filter((h) => Number.isFinite(h) && h >= 0 && h <= 23)))
+  limpas.sort((a, b) => a - b)
+  return limpas.length ? limpas.slice(0, 3) : padrao.slice()
+}
+
 async function lerConfigEmail() {
+  const PAD = {
+    ativo: false,
+    reembolso: {
+      gestor: { on: true, hora: 10 },
+      master: { on: true, hora: 10 },
+      financeiro: { on: true, horas: [10, 15] },
+      colaborador: { recusado: true, pago: true },
+    },
+    mural: { on: true },
+    clima: { on: true },
+  }
   try {
     const snap = await dbA.doc('config/email').get()
-    const d = snap.exists ? snap.data() : {}
+    const d = snap.exists ? (snap.data() || {}) : {}
+    const r = (d.reembolso && typeof d.reembolso === 'object') ? d.reembolso : {}
+    const g = r.gestor || {}, m = r.master || {}, f = r.financeiro || {}, c = r.colaborador || {}
+    const muralOn = (d.mural && typeof d.mural === 'object') ? d.mural.on : d.mural
+    const climaOn = (d.clima && typeof d.clima === 'object') ? d.clima.on : d.clima
     return {
-      ativo: d && d.ativo === true,
-      tipos: (d && typeof d.tipos === 'object' && d.tipos) || {},
+      ativo: d.ativo === true,
+      reembolso: {
+        gestor: { on: g.on !== false, hora: horaOk(g.hora, 10) },
+        master: { on: m.on !== false, hora: horaOk(m.hora, 10) },
+        financeiro: { on: f.on !== false, horas: horasOk(f.horas, [10, 15]) },
+        colaborador: { recusado: c.recusado !== false, pago: c.pago !== false },
+      },
+      mural: { on: muralOn !== false },
+      clima: { on: climaOn !== false },
     }
   } catch (e) {
     logger.error('config/email ilegível', e)
-    return { ativo: false, tipos: {} }
+    return PAD
   }
 }
 
-/** Um tipo de aviso está ligado quando o interruptor geral está ligado e o
- *  tipo não foi desligado individualmente (ausente = ligado). */
-function tipoLigado(cfg, tipo) {
-  if (!cfg.ativo) return false
-  return cfg.tipos[tipo] !== false
+// Hora atual (0 a 23) no fuso de São Paulo, para os resumos agendados.
+function horaSP() {
+  try {
+    const s = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', hour: '2-digit', hour12: false }).format(new Date())
+    const h = parseInt(s, 10)
+    return Number.isFinite(h) ? (h % 24) : -1
+  } catch (e) {
+    logger.error('horaSP falhou', e)
+    return -1
+  }
 }
 
 // -------------------------------------------------------------
@@ -153,17 +194,16 @@ exports.emailDaNotificacao = onDocumentCreated(
       logger.info(`alvo ${alvo}: e-mail por evento desligado (usa resumo agendado)`)
       return
     }
-    // Colaborador recebe e-mail por evento SO em recusa, pago e agendado.
-    // Os avisos intermediarios (aprovado em andamento, reenviado) ficam no sino.
-    const EMAIL_AO_COLABORADOR = new Set(['reembolso_recusado', 'reembolso_pago', 'reembolso_agendado'])
-    if (alvo.startsWith('u:') && String(n.tipo).startsWith('reembolso_') && !EMAIL_AO_COLABORADOR.has(n.tipo)) {
-      logger.info(`colaborador: e-mail so em recusa/pagamento (tipo=${n.tipo} ignorado)`)
-      return
-    }
-
+    // Colaborador recebe e-mail por evento final: recusa (que pede reajuste) e
+    // pagamento (pago ou agendado). Cada um tem o seu liga/desliga na central.
     const cfg = await lerConfigEmail()
-    if (!tipoLigado(cfg, n.tipo)) {
-      logger.info(`e-mail desligado para tipo=${n.tipo}; nada enviado`)
+    if (!cfg.ativo) { logger.info('e-mail desligado; nada enviado'); return }
+    const col = cfg.reembolso.colaborador
+    const ehRecusa = n.tipo === 'reembolso_recusado'
+    const ehPagamento = n.tipo === 'reembolso_pago' || n.tipo === 'reembolso_agendado'
+    const liberado = (ehRecusa && col.recusado) || (ehPagamento && col.pago)
+    if (!liberado) {
+      logger.info(`colaborador: evento sem e-mail (tipo=${n.tipo})`)
       return
     }
 
@@ -205,16 +245,11 @@ exports.emailDaNotificacao = onDocumentCreated(
 // recebe o seu proprio e-mail (ninguem ve o endereco do outro).
 // =============================================================
 
-// Interruptor opcional (config/mural_email.ativo). Sem o doc, fica LIGADO.
+// O aviso do mural agora sai da central config/email: precisa do interruptor
+// geral ligado E do item Mural ligado.
 async function muralEmailLigado() {
-  try {
-    const snap = await dbA.doc('config/mural_email').get()
-    if (!snap.exists) return true
-    return snap.data().ativo !== false
-  } catch (e) {
-    logger.error('config/mural_email ilegível', e)
-    return true
-  }
+  const cfg = await lerConfigEmail()
+  return cfg.ativo && cfg.mural.on
 }
 
 // E-mails de todos os colaboradores ATIVOS com e-mail (cadastro = funcionarios).
@@ -483,15 +518,11 @@ const STATUS_RESUMO_LABEL = {
 }
 
 // -------------------------------------------------------------
-// GESTOR: um resumo por dia (10:00), so o centro de custo dele, dos pedidos
-// aguardando a aprovacao dele. Sem pendencia, nao envia.
+// GESTOR: resumo do(s) centro(s) de custo dele, dos pedidos aguardando a
+// aprovacao dele. Sem pendencia, nao envia. Chamado pelo agendador de hora em
+// hora, no horario configurado em config/email.
 // -------------------------------------------------------------
-exports.resumoDiarioGestor = onSchedule(
-  { schedule: '0 10 * * *', timeZone: 'America/Sao_Paulo', secrets: [SENDGRID_API_KEY] },
-  async () => {
-    const cfg = await lerConfigResumo()
-    if (!cfg.ativo) { logger.info('resumos desligados; nada enviado'); return }
-
+async function resumoGestor(cfg) {
     const snap = await dbA.collection('reembolsos').where('status', '==', 'pendente_gestor').get()
     const pendentes = []
     snap.forEach((d) => {
@@ -535,20 +566,14 @@ exports.resumoDiarioGestor = onSchedule(
       ultima_execucao: new Date().toISOString(), pendentes_total: pendentes.length,
       com_pendencia: comPendencia, enviados, falhas, teste: !!cfg.teste_para,
     } }, { merge: true }).catch(() => {})
-  },
-)
+}
 
 // -------------------------------------------------------------
-// MASTER: um resumo por dia (10:00) com TODOS os pendentes de todas as areas
-// (aguardando aprovacao do gestor/master + aguardando pagamento). Visao geral.
-// Nao inclui agendados (ja resolvidos pelo Financeiro). Sem pendencia, nao envia.
+// MASTER: resumo com TODOS os pendentes de todas as areas (aguardando aprovacao
+// do gestor/master + aguardando pagamento). Visao geral. Nao inclui agendados
+// (ja resolvidos pelo Financeiro). Sem pendencia, nao envia.
 // -------------------------------------------------------------
-exports.resumoDiarioMaster = onSchedule(
-  { schedule: '0 10 * * *', timeZone: 'America/Sao_Paulo', secrets: [SENDGRID_API_KEY] },
-  async () => {
-    const cfg = await lerConfigResumo()
-    if (!cfg.ativo) { logger.info('resumos desligados; nada enviado'); return }
-
+async function resumoMaster(cfg) {
     const snap = await dbA.collection('reembolsos')
       .where('status', 'in', ['pendente_gestor', 'pendente_master', 'pendente_financeiro']).get()
     const itens = []
@@ -586,19 +611,13 @@ exports.resumoDiarioMaster = onSchedule(
     await dbA.doc('config/resumo_reembolso').set({ master: {
       ultima_execucao: new Date().toISOString(), pendentes_total: itens.length, enviados, falhas, teste: !!cfg.teste_para,
     } }, { merge: true }).catch(() => {})
-  },
-)
+}
 
 // -------------------------------------------------------------
-// FINANCEIRO: dois resumos por dia (10:00 e 15:00) com os reembolsos aprovados
-// aguardando pagamento (pendente_financeiro). Sem nada a pagar, nao envia.
+// FINANCEIRO: resumo dos reembolsos aprovados aguardando pagamento
+// (pendente_financeiro). Sem nada a pagar, nao envia.
 // -------------------------------------------------------------
-exports.resumoFinanceiro = onSchedule(
-  { schedule: '0 10,15 * * *', timeZone: 'America/Sao_Paulo', secrets: [SENDGRID_API_KEY] },
-  async () => {
-    const cfg = await lerConfigResumo()
-    if (!cfg.ativo) { logger.info('resumos desligados; nada enviado'); return }
-
+async function resumoFinanceiro(cfg) {
     const snap = await dbA.collection('reembolsos').where('status', '==', 'pendente_financeiro').get()
     const itens = []
     snap.forEach((d) => {
@@ -636,5 +655,140 @@ exports.resumoFinanceiro = onSchedule(
     await dbA.doc('config/resumo_reembolso').set({ financeiro: {
       ultima_execucao: new Date().toISOString(), pendentes_total: itens.length, enviados, falhas, teste: !!cfg.teste_para,
     } }, { merge: true }).catch(() => {})
+}
+
+// -------------------------------------------------------------
+// Agendador dos resumos de Reembolso: roda de hora em hora (fuso de Sao Paulo)
+// e dispara cada resumo quando a hora atual bate com o horario configurado em
+// config/email. Assim os horarios sao configuraveis sem novo deploy. Precisa do
+// interruptor geral ligado e de cada item ligado.
+// -------------------------------------------------------------
+exports.resumosReembolso = onSchedule(
+  { schedule: '0 * * * *', timeZone: 'America/Sao_Paulo', secrets: [SENDGRID_API_KEY] },
+  async () => {
+    const cfg = await lerConfigEmail()
+    if (!cfg.ativo) { logger.info('e-mail desligado; resumos nao enviados'); return }
+    const hora = horaSP()
+    if (hora < 0) { logger.error('hora de Sao Paulo indefinida; resumos nao enviados'); return }
+    const cfgResumo = await lerConfigResumo() // teste_para (redireciona em modo teste)
+    const re = cfg.reembolso
+
+    if (re.gestor.on && re.gestor.hora === hora) {
+      try { await resumoGestor(cfgResumo) } catch (e) { logger.error('resumo gestor falhou', e) }
+    }
+    if (re.master.on && re.master.hora === hora) {
+      try { await resumoMaster(cfgResumo) } catch (e) { logger.error('resumo master falhou', e) }
+    }
+    if (re.financeiro.on && re.financeiro.horas.includes(hora)) {
+      try { await resumoFinanceiro(cfgResumo) } catch (e) { logger.error('resumo financeiro falhou', e) }
+    }
+    if (!(re.gestor.on && re.gestor.hora === hora)
+      && !(re.master.on && re.master.hora === hora)
+      && !(re.financeiro.on && re.financeiro.horas.includes(hora))) {
+      logger.info(`hora ${hora}h: nenhum resumo programado`)
+    }
+  },
+)
+
+// =============================================================
+// Pesquisa de Clima -> e-mail para todos os colaboradores ativos.
+//
+// Dispara UMA vez, quando uma pesquisa do tipo 'clima' passa a ABERTA (nasce
+// aberta, ou um rascunho e aberta). Nunca reenvia: reabrir, editar ou encerrar
+// nao gera novo e-mail. Cada pessoa recebe o seu proprio e-mail. Controlado pela
+// central config/email (interruptor geral + item Clima).
+// =============================================================
+function montarHtmlClima(titulo, descricao, href) {
+  const t = escapar(titulo)
+  const d = descricao ? `<p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#44474d">${escapar(descricao)}</p>` : ''
+  return `<!doctype html><html lang="pt-BR"><body style="margin:0;background:#f4f5f7;padding:24px;font-family:Arial,Helvetica,sans-serif;color:#1a1714">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e7e8ec">
+      <tr><td style="background:#002443;padding:18px 24px;color:#ffffff;font-size:15px;font-weight:bold">Gente e Cultura</td></tr>
+      <tr><td style="padding:24px">
+        <p style="margin:0 0 6px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#1a4895;font-weight:bold">Nova pesquisa de clima</p>
+        <h1 style="margin:0 0 10px;font-size:18px;color:#002443">${t}</h1>
+        ${d}
+        <a href="${href}" style="display:inline-block;background:#1a4895;color:#ffffff;text-decoration:none;font-size:14px;font-weight:bold;padding:11px 20px;border-radius:9px">Responder a pesquisa</a>
+      </td></tr>
+      <tr><td style="padding:16px 24px;border-top:1px solid #eef0f3;font-size:12px;color:#8a8d93">
+        A sua resposta é importante e tratada conforme a confidencialidade da pesquisa. Acesse ${SITE} para participar.
+      </td></tr>
+    </table>
+  </td></tr></table>
+</body></html>`
+}
+
+exports.emailPesquisaClima = onDocumentWritten(
+  { document: 'pesquisas/{id}', secrets: [SENDGRID_API_KEY] },
+  async (event) => {
+    const change = event.data
+    if (!change) return
+    const after = change.after
+    if (!after || !after.exists) return // exclusao: ignora
+    const p = after.data() || {}
+
+    // Só pesquisas de clima, já abertas.
+    if (p.tipo !== 'clima' || p.status !== 'aberta') return
+
+    // Só a TRANSICAO para aberta dispara. Se já estava aberta antes, é edição.
+    const before = change.before
+    const jaAberta = !!(before && before.exists && (before.data() || {}).status === 'aberta')
+    if (jaAberta) return
+
+    // Já disparado alguma vez? Nunca reenvia.
+    if (p.email_clima_em) return
+
+    const cfg = await lerConfigEmail()
+    if (!(cfg.ativo && cfg.clima.on)) {
+      logger.info('clima email desligado; nada enviado')
+      return
+    }
+
+    // Trava de envio único (idempotência contra reentregas do gatilho).
+    const ref = after.ref
+    const reservou = await dbA.runTransaction(async (tx) => {
+      const d = await tx.get(ref)
+      const cur = d.data() || {}
+      if (cur.tipo !== 'clima' || cur.status !== 'aberta') return false
+      if (cur.email_clima_em) return false
+      tx.update(ref, { email_clima_em: new Date().toISOString(), email_clima_status: 'enviando' })
+      return true
+    }).catch((e) => { logger.error('reserva do envio de clima falhou', e); return false })
+    if (!reservou) return
+
+    let destinatarios = []
+    try {
+      destinatarios = await emailsColaboradoresAtivos()
+    } catch (e) {
+      logger.error('falha ao listar colaboradores ativos (clima)', e)
+    }
+    if (destinatarios.length === 0) {
+      await ref.set({ email_clima_status: 'sem_destinatario', email_clima_em: new Date().toISOString() }, { merge: true }).catch(() => {})
+      return
+    }
+
+    const titulo = p.titulo || 'Nova pesquisa de clima'
+    const descricao = typeof p.descricao === 'string' ? p.descricao : ''
+    const href = p.slug ? `${SITE}/p?slug=${encodeURIComponent(p.slug)}` : SITE
+    const html = montarHtmlClima(titulo, descricao, href)
+    const texto = `${titulo}\n\n${descricao}\n\nResponda no portal: ${href}`
+    const assunto = `Nova pesquisa de clima: ${titulo}`
+
+    // Um e-mail por pessoa (ninguém vê o endereço do outro). Best-effort.
+    const resultados = await Promise.allSettled(
+      destinatarios.map((para) => enviarEmail({ para, assunto, html, texto })),
+    )
+    const enviados = resultados.filter((x) => x.status === 'fulfilled').length
+    const falhas = resultados.length - enviados
+    logger.info(`clima "${titulo}": ${enviados} enviados, ${falhas} falharam (de ${destinatarios.length})`)
+
+    await ref.set({
+      email_clima_status: falhas ? (enviados ? 'parcial' : 'falhou') : 'enviado',
+      email_clima_enviados: enviados,
+      email_clima_falhas: falhas,
+      email_clima_total: destinatarios.length,
+      email_clima_em: new Date().toISOString(),
+    }, { merge: true }).catch(() => {})
   },
 )
