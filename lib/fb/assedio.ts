@@ -12,7 +12,7 @@
 // de custo), para que a equipe consiga atuar e acolher a pessoa. Os
 // anexos ficam na coleção `assedio_anexos`, também restrita a G&C.
 // =============================================================
-import { addDoc, collection, doc, getDoc } from 'firebase/firestore'
+import { addDoc, collection, doc, getDoc, setDoc } from 'firebase/firestore'
 import { db, auth } from '../firebase'
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
@@ -66,6 +66,70 @@ export async function getMensagensAssedio(): Promise<MensagensAssedio> {
     acolhimento: texto(d.acolhimento, MENSAGENS_ASSEDIO_PADRAO.acolhimento),
     descontinuidade: texto(d.descontinuidade, MENSAGENS_ASSEDIO_PADRAO.descontinuidade),
   }
+}
+
+// -------------------------------------------------------------
+// Mensagens-modelo para uso com candidatos (processos seletivos). Ficam na
+// pagina do protocolo, ao lado do relato, com botao de copiar. Editaveis por
+// Gente e Cultura (papel 'gente_cultura') ou Super, pela regra de config/assedio.
+// -------------------------------------------------------------
+export const MENSAGENS_MODELO_ASSEDIO_PADRAO = {
+  aviso_inicial:
+    'Este é um canal comercial oficial do Grupo Soulan, exclusivo para processos seletivos. Nossas conversas são monitoradas e pautadas pelo respeito profissional. Qualquer conduta imprópria, ofensa ou assédio resultará em bloqueio imediato e medidas na esfera judicial. A seguir, nossa equipe apresentará a vaga em aberto.',
+  resposta_conduta:
+    'No Grupo Soulan prezamos rigorosamente pelo respeito, pela ética e pelo profissionalismo em todas as interações. Nossos canais de comunicação destinam-se exclusivamente a fins profissionais e processos de recrutamento e seleção. A conduta apresentada em suas mensagens não condiz com as diretrizes e os valores da nossa organização, constituindo comportamento inadequado e inaceitável. Em virtude disso, informamos que a sua participação em nossos processos seletivos foi descontinuada e o seu registro removido permanentemente de nossa base de talentos. Este contato será bloqueado a partir deste momento. Atenciosamente, Grupo Soulan.',
+}
+
+export type MensagensModeloAssedio = typeof MENSAGENS_MODELO_ASSEDIO_PADRAO
+
+/** Le as mensagens-modelo. Caem no texto inicial enquanto nao houver versao
+ *  personalizada em config/assedio. */
+export async function getMensagensModeloAssedio(): Promise<MensagensModeloAssedio> {
+  const snap = await getDoc(doc(db(), 'config', 'assedio')).catch(() => null)
+  const d = (snap && snap.exists() ? snap.data() : {}) as Record<string, unknown>
+  const texto = (v: unknown, padrao: string) =>
+    typeof v === 'string' && v.trim() ? v : padrao
+  return {
+    aviso_inicial: texto(d.aviso_inicial, MENSAGENS_MODELO_ASSEDIO_PADRAO.aviso_inicial),
+    resposta_conduta: texto(d.resposta_conduta, MENSAGENS_MODELO_ASSEDIO_PADRAO.resposta_conduta),
+  }
+}
+
+/** Salva as mensagens-modelo (merge em config/assedio). As Regras so deixam o
+ *  Super ou o papel 'gente_cultura' escrever. */
+export async function salvarMensagensModeloAssedio(m: { aviso_inicial: string; resposta_conduta: string }): Promise<void> {
+  const aviso = String(m.aviso_inicial ?? '').trim()
+  const resposta = String(m.resposta_conduta ?? '').trim()
+  if (!aviso || !resposta) throw new Error('As duas mensagens precisam de texto.')
+  await setDoc(
+    doc(db(), 'config', 'assedio'),
+    {
+      aviso_inicial: aviso,
+      resposta_conduta: resposta,
+      mensagens_modelo_em: new Date().toISOString(),
+      mensagens_modelo_por: auth().currentUser?.email ?? '',
+    },
+    { merge: true },
+  )
+}
+
+/** Quem pode editar as mensagens-modelo (espelha a regra de config/assedio):
+ *  Super (conta de administracao) ou funcionario com o papel 'gente_cultura'. */
+export async function podeEditarAssedio(): Promise<boolean> {
+  const u = auth().currentUser
+  if (!u) return false
+  const adm = await getDoc(doc(db(), 'admins', u.uid)).catch(() => null)
+  if (adm && adm.exists()) {
+    const d = adm.data() as Record<string, unknown>
+    if (d.ativo !== false && d.nivel === 'super') return true
+  }
+  const func = await getDoc(doc(db(), 'funcionarios', u.uid)).catch(() => null)
+  if (func && func.exists()) {
+    const d = func.data() as Record<string, unknown>
+    const papeis = Array.isArray(d.papeis) ? (d.papeis as string[]) : []
+    if (d.ativo !== false && papeis.includes('gente_cultura')) return true
+  }
+  return false
 }
 
 // -------------------------------------------------------------
