@@ -75,29 +75,38 @@ export default function ProtocoloAssedio() {
           </ol>
         </section>
 
-        {/* Relato + mensagens-modelo lado a lado (empilha no celular) */}
-        <section className="mt-9 grid items-start gap-4 lg:grid-cols-2">
-          <Link
-            href="/canal/assedio/relato"
-            className="cartao-g cartao-clicavel group flex items-center gap-4 p-5 sm:p-6"
+        {/* Destaque: Fazer um relato (faixa em largura total) */}
+        <section className="mt-9">
+          <div
+            className="overflow-hidden rounded-2xl text-white shadow-[0_6px_20px_rgba(0,36,67,0.22)]"
+            style={{ background: 'linear-gradient(135deg, #1a4895 0%, #002443 100%)' }}
           >
-            <span
-              className="flex h-12 w-12 flex-none items-center justify-center rounded-xl text-white"
-              style={{ background: 'linear-gradient(135deg, #1a4895 0%, #002443 100%)' }}
-            >
-              <MessageSquareWarning size={22} aria-hidden />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-[0.9375rem] font-semibold tracking-[-0.012em] text-tinta">
-                Fazer um relato
+            <div className="flex flex-col gap-5 p-6 sm:flex-row sm:items-center sm:gap-6 sm:p-8">
+              <span className="flex h-16 w-16 flex-none items-center justify-center rounded-2xl bg-white/15 ring-1 ring-white/25">
+                <MessageSquareWarning size={32} strokeWidth={2} aria-hidden />
               </span>
-              <span className="block text-[0.8125rem] leading-[1.5] text-tinta-3">
-                Leva poucos minutos e é recebido pela equipe de Gente e Cultura.
-              </span>
-            </span>
-            <ArrowRight size={18} className="flex-none text-tinta-3 transition-transform group-hover:translate-x-0.5" aria-hidden />
-          </Link>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-2xl font-bold leading-tight tracking-[-0.015em] sm:text-[1.75rem]">
+                  Fazer um relato
+                </h2>
+                <p className="mt-2 max-w-2xl text-[0.9375rem] leading-6 text-white/85">
+                  Leva poucos minutos e é recebido em sigilo pela equipe de Gente e Cultura.
+                  Você não está sozinha: estamos aqui para acolher, apurar e cuidar de você.
+                </p>
+              </div>
+              <Link
+                href="/canal/assedio/relato"
+                className="group inline-flex flex-none items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-[0.9375rem] font-semibold text-marca-texto shadow-sm transition-colors hover:bg-plano"
+              >
+                Começar relato
+                <ArrowRight size={18} className="transition-transform group-hover:translate-x-0.5" aria-hidden />
+              </Link>
+            </div>
+          </div>
+        </section>
 
+        {/* Mensagens-modelo logo abaixo do destaque */}
+        <section className="mt-5">
           <MensagensModelo />
         </section>
       </main>
@@ -215,9 +224,9 @@ function MensagensModelo() {
 
       {erro && <p className="mt-3 rounded-lg border border-[#f0c2c2] bg-[#fdeaea] px-3 py-2 text-sm text-[#8a1f1f]">{erro}</p>}
 
-      <div className="mt-4 space-y-3">
+      <div className="mt-4 grid items-start gap-3 lg:grid-cols-2">
         {CAMPOS_MODELO.map((campo) => (
-          <div key={campo.chave} className="rounded-xl border border-borda bg-superficie-2 p-3.5">
+          <div key={campo.chave} className="flex h-full flex-col rounded-xl border border-borda bg-superficie-2 p-3.5">
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-tinta">{campo.titulo}</p>
