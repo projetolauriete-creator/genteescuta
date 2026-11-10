@@ -1,19 +1,19 @@
 'use client'
 
-import { CabecalhoPagina } from '@/components/ui'
-import { GestaoTrilhasDev } from '@/components/GestaoTrilhasDev'
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 
-export default function AdminTrilhaDesenvolvimento() {
+// A gestão das Trilhas de Desenvolvimento foi unida à Central de Conhecimento.
+// Esta rota antiga redireciona para a aba certa, para não quebrar links salvos.
+export default function RedirecionaTrilhaDesenvolvimento() {
+  const router = useRouter()
+  useEffect(() => {
+    router.replace('/admin/treinamento?aba=trilhas')
+  }, [router])
+
   return (
-    <>
-      <CabecalhoPagina
-        titulo="Trilha de Desenvolvimento"
-        descricao="Crie trilhas gamificadas com atividades e pontos. As mudanças aparecem para os colaboradores na hora."
-        voltar={{ href: '/trilhas', rotulo: 'Ver trilhas (colaborador)' }}
-      />
-      <div className="space-y-4 p-4 sm:p-6">
-        <GestaoTrilhasDev />
-      </div>
-    </>
+    <div className="grid min-h-[40vh] place-items-center text-sm text-tinta-3">
+      Redirecionando para a Central de Conhecimento…
+    </div>
   )
 }

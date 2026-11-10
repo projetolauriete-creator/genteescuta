@@ -77,8 +77,7 @@ export const TELAS: Tela[] = [
   // ---- Conteúdo do site ----
   { id: 'carrossel',    rotulo: 'Carrossel da home', href: '/admin/carrossel',         grupo: 'conteudo', acoes: ['ver', 'adicionar', 'editar', 'excluir'] },
   { id: 'informacoes',  rotulo: 'Informações Adm.', href: '/admin/informacoes',        grupo: 'conteudo', acoes: ['ver', 'adicionar', 'editar', 'excluir'] },
-  { id: 'treinamento',  rotulo: 'Central de Conhecimento', href: '/admin/treinamento',   grupo: 'conteudo', acoes: ['ver', 'adicionar', 'editar'] },
-  { id: 'trilhas_dev',  rotulo: 'Trilha de Desenvolvimento', href: '/admin/trilha-desenvolvimento', grupo: 'conteudo', acoes: ['ver', 'adicionar', 'editar', 'excluir'] },
+  { id: 'treinamento',  rotulo: 'Central de Conhecimento', href: '/admin/treinamento',   grupo: 'conteudo', acoes: ['ver', 'adicionar', 'editar', 'excluir'] },
   { id: 'contato',      rotulo: 'Contato',          href: '/admin/contato',            grupo: 'conteudo', acoes: ['ver', 'editar'] },
   { id: 'institucional',rotulo: 'Sobre / Missão',   href: '/admin/institucional',      grupo: 'conteudo', acoes: ['ver', 'editar'] },
 
