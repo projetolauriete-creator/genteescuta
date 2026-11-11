@@ -33,8 +33,9 @@ export default function Entrar() {
         router.replace('/primeiro-acesso')
         return
       }
-      // Todos caem na página inicial (Visão geral do admin; home para os demais).
-      router.replace(p.tipo === 'admin' ? '/admin' : '/')
+      // Todos (inclusive admin) caem na home do portal. O Painel ADM continua
+      // acessível pelo botão no topo, para quem tem permissão.
+      router.replace('/')
     })
     return cancelar
   }, [router])

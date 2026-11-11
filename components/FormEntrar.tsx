@@ -15,7 +15,7 @@ export function FormEntrar() {
     const f = new FormData(e.currentTarget)
     const r = await entrar(String(f.get('email') ?? ''), String(f.get('senha') ?? ''))
     // O redirecionamento é feito na página /entrar (observarLogin):
-    // todos → página inicial (admin → /admin; demais → /), senha provisória → primeiro acesso.
+    // todos vão para a home do portal (/); senha provisória vai para primeiro acesso.
     if (!r.ok) {
       setErro(r.erro ?? 'Não consegui entrar.')
       setPendente(false)
