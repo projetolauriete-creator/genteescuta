@@ -580,13 +580,20 @@ function ListaMinhas({ carregando, itens, perfil, aoAtualizar, setErro, setAviso
   const [busca, setBusca] = useState('')
   const [fStatus, setFStatus] = useState('')
   const [fCategoria, setFCategoria] = useState('')
+  const [fMes, setFMes] = useState('')
 
   const statuses = useMemo(() => Array.from(new Set(itens.map((r) => statusEfetivo(r.status, r.data_pagamento)))), [itens])
   const categorias = useMemo(() => Array.from(new Set(itens.map((r) => r.categoria).filter(Boolean))).sort(), [itens])
+  // Meses disponíveis (pela data da despesa), do mais recente ao mais antigo.
+  const meses = useMemo(
+    () => Array.from(new Set(itens.map((r) => String(r.data_despesa || '').slice(0, 7)).filter(Boolean))).sort().reverse(),
+    [itens],
+  )
 
   const filtrados = useMemo(() => {
     const q = normalizar(busca)
     return itens.filter((r) => {
+      if (fMes && String(r.data_despesa || '').slice(0, 7) !== fMes) return false
       if (fStatus && statusEfetivo(r.status, r.data_pagamento) !== fStatus) return false
       if (fCategoria && r.categoria !== fCategoria) return false
       if (q) {
@@ -595,11 +602,34 @@ function ListaMinhas({ carregando, itens, perfil, aoAtualizar, setErro, setAviso
       }
       return true
     })
-  }, [itens, busca, fStatus, fCategoria])
+  }, [itens, busca, fMes, fStatus, fCategoria])
+
+  // Totais recalculados conforme os filtros (sempre sobre as PRÓPRIAS solicitações).
+  const totais = useMemo(() => {
+    let solicitadoV = 0, aguardN = 0, aguardV = 0, pagoN = 0, pagoV = 0, recusN = 0, recusV = 0
+    for (const r of filtrados) {
+      const v = Number(r.valor) || 0
+      solicitadoV += v
+      const s = statusEfetivo(r.status, r.data_pagamento)
+      if (emAbertoReembolso(r)) { aguardN++; aguardV += v }
+      else if (s === 'pago') { pagoN++; pagoV += v }
+      else if (s === 'recusado') { recusN++; recusV += v }
+    }
+    return { solicitadoN: filtrados.length, solicitadoV, aguardN, aguardV, pagoN, pagoV, recusN, recusV }
+  }, [filtrados])
 
   const emAberto = filtrados.filter(emAbertoReembolso)
   const concluido = filtrados.filter((r) => !emAbertoReembolso(r))
-  const temFiltro = !!(busca || fStatus || fCategoria)
+  const temFiltro = !!(busca || fStatus || fCategoria || fMes)
+
+  // Resumo dos filtros para o cabeçalho das exportações (respeitam o que está filtrado).
+  const resumoFiltros = [
+    fMes ? `Mês: ${rotuloMes(fMes)}` : '',
+    fStatus ? `Status: ${STATUS_LABEL[fStatus as StatusReembolso]}` : '',
+    fCategoria ? `Categoria: ${fCategoria}` : '',
+    busca ? `Busca: ${busca}` : '',
+  ].filter(Boolean).join(' · ') || 'Sem filtros'
+  const TITULO_EXPORT = 'Minhas solicitações de reembolso'
 
   if (carregando) return <p className="text-sm text-tinta-3">Carregando…</p>
   if (itens.length === 0)
@@ -628,12 +658,24 @@ function ListaMinhas({ carregando, itens, perfil, aoAtualizar, setErro, setAviso
 
   return (
     <div className="space-y-5">
-      {/* Filtros de pesquisa (mesmos do painel dos aprovadores) */}
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+      {/* Cartões de total (só as PRÓPRIAS solicitações; refletem os filtros) */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <CartaoTotal rotulo="Total solicitado" valor={totais.solicitadoV} qtd={totais.solicitadoN} />
+        <CartaoTotal rotulo="Aguardando" valor={totais.aguardV} qtd={totais.aguardN} cor="moderado" ajuda="Esperando aprovação ou pagamento" />
+        <CartaoTotal rotulo="Recebido / pago" valor={totais.pagoV} qtd={totais.pagoN} cor="baixo" />
+        <CartaoTotal rotulo="Recusados" valor={totais.recusV} qtd={totais.recusN} cor="critico" />
+      </div>
+
+      {/* Filtros de pesquisa */}
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         <div className="relative">
           <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-tinta-3" aria-hidden />
           <input value={busca} onChange={(e) => setBusca(e.target.value)} className={`${ENTRADA} pl-9`} placeholder="Buscar (valor, categoria, motivo…)" />
         </div>
+        <select value={fMes} onChange={(e) => setFMes(e.target.value)} className={ENTRADA}>
+          <option value="">Todos os meses</option>
+          {meses.map((m) => <option key={m} value={m}>{rotuloMes(m)}</option>)}
+        </select>
         <select value={fStatus} onChange={(e) => setFStatus(e.target.value)} className={ENTRADA}>
           <option value="">Todos os status</option>
           {statuses.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
@@ -643,14 +685,23 @@ function ListaMinhas({ carregando, itens, perfil, aoAtualizar, setErro, setAviso
           {categorias.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
       </div>
-      {temFiltro && (
-        <div className="-mt-3 flex items-center justify-between text-xs text-tinta-3">
-          <span>{filtrados.length} de {itens.length} solicitação(ões)</span>
-          <button type="button" onClick={() => { setBusca(''); setFStatus(''); setFCategoria('') }} className="inline-flex items-center gap-1 font-medium hover:text-critico">
-            <X size={12} aria-hidden /> Limpar filtros
-          </button>
+
+      {/* Baixar (respeita os filtros aplicados) + contador */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs text-tinta-3">
+          {temFiltro ? <>{filtrados.length} de {itens.length} solicitação(ões)</> : <>{itens.length} solicitação(ões)</>}
+          {temFiltro && (
+            <button type="button" onClick={() => { setBusca(''); setFStatus(''); setFCategoria(''); setFMes('') }} className="ml-2 inline-flex items-center gap-1 font-medium hover:text-critico">
+              <X size={12} aria-hidden /> Limpar filtros
+            </button>
+          )}
+        </span>
+        <div className="flex gap-2">
+          <button type="button" disabled={filtrados.length === 0} onClick={() => baixarXlsxReemb(filtrados, resumoFiltros, TITULO_EXPORT)} className="inline-flex items-center gap-1.5 rounded-lg border border-borda-forte bg-white px-3 py-1.5 text-sm font-medium text-tinta-2 hover:border-marca hover:text-marca-texto disabled:opacity-40"><FileSpreadsheet size={15} aria-hidden /> Planilha</button>
+          <button type="button" disabled={filtrados.length === 0} onClick={() => baixarCSV(filtrados, resumoFiltros, TITULO_EXPORT)} className="inline-flex items-center gap-1.5 rounded-lg border border-borda-forte bg-white px-3 py-1.5 text-sm font-medium text-tinta-2 hover:border-marca hover:text-marca-texto disabled:opacity-40"><Download size={15} aria-hidden /> CSV</button>
+          <button type="button" disabled={filtrados.length === 0} onClick={() => imprimirPDF(filtrados, resumoFiltros, TITULO_EXPORT)} className="inline-flex items-center gap-1.5 rounded-lg border border-borda-forte bg-white px-3 py-1.5 text-sm font-medium text-tinta-2 hover:border-marca hover:text-marca-texto disabled:opacity-40"><Printer size={15} aria-hidden /> PDF</button>
         </div>
-      )}
+      </div>
 
       <SecaoMinhas titulo="Em aberto" itens={emAberto} vazio="Nada em aberto no momento." onEditar={abrirEdicao} onExcluir={excluir} excluindo={excluindo} />
       <SecaoMinhas titulo="Concluído" itens={concluido} vazio="Nada concluído ainda." onEditar={abrirEdicao} onExcluir={excluir} excluindo={excluindo} />
@@ -663,6 +714,20 @@ function ListaMinhas({ carregando, itens, perfil, aoAtualizar, setErro, setAviso
           aoSalvo={(msg) => { setEditar(null); setErro(null); setAviso(msg); aoAtualizar() }}
         />
       )}
+    </div>
+  )
+}
+
+// Cartão de total da visão pessoal: valor (R$) em destaque + quantidade.
+function CartaoTotal({ rotulo, valor, qtd, cor, ajuda }: {
+  rotulo: string; valor: number; qtd: number; cor?: 'moderado' | 'baixo' | 'critico'; ajuda?: string
+}) {
+  const corValor = cor === 'baixo' ? 'text-verde-escuro' : cor === 'critico' ? 'text-critico' : cor === 'moderado' ? 'text-[#8a6d00]' : 'text-tinta'
+  return (
+    <div className="cartao-g px-4 py-3">
+      <p className="text-xs font-medium text-tinta-3">{rotulo}</p>
+      <p className={`mt-1 text-[1.5rem] font-[650] leading-none tracking-tight ${corValor}`}>{formatBRL(valor)}</p>
+      <p className="mt-1.5 text-xs text-tinta-3">{qtd} {qtd === 1 ? 'solicitação' : 'solicitações'}{ajuda ? ` · ${ajuda}` : ''}</p>
     </div>
   )
 }
@@ -1386,12 +1451,12 @@ function linhasExport(itens: Reembolso[]) {
     Status: STATUS_LABEL[statusEfetivo(r.status, r.data_pagamento)], Pagamento: r.data_pagamento ? formatData(r.data_pagamento) : '-',
   }))
 }
-function baixarCSV(itens: Reembolso[], filtros: string) {
+function baixarCSV(itens: Reembolso[], filtros: string, titulo = 'Central das Solicitações de Reembolso') {
   const linhas = linhasExport(itens); if (linhas.length === 0) return
   const cab = Object.keys(linhas[0]); const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
   // Topo: título, filtros aplicados + total de registros e data.
   const topo = [
-    [esc('Central das Solicitações de Reembolso')].join(';'),
+    [esc(titulo)].join(';'),
     [esc(`${filtros || 'Sem filtros'} · ${itens.length} registro(s)`)].join(';'),
     [esc(`Gerado em ${new Date().toLocaleString('pt-BR')}`)].join(';'),
     '',
@@ -1401,19 +1466,19 @@ function baixarCSV(itens: Reembolso[], filtros: string) {
   const a = document.createElement('a'); a.href = url; a.download = `reembolsos-${new Date().toISOString().slice(0, 10)}.csv`; a.click()
   setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
-async function baixarXlsxReemb(itens: Reembolso[], filtros: string) {
+async function baixarXlsxReemb(itens: Reembolso[], filtros: string, titulo = 'Central das Solicitações de Reembolso') {
   const linhas = linhasExport(itens); if (linhas.length === 0) return
   const cab = Object.keys(linhas[0])
   await exportarXlsx({
     nomeArquivo: `reembolsos-${new Date().toISOString().slice(0, 10)}`,
-    titulo: 'Central das Solicitações de Reembolso',
+    titulo,
     filtros: `${filtros || 'Sem filtros'} · ${itens.length} registro(s)`,
     colunas: cab,
     linhas: linhas.map((l) => cab.map((c) => (l as any)[c] ?? '')),
     nomeAba: 'Reembolsos',
   })
 }
-function imprimirPDF(itens: Reembolso[], filtros: string) {
+function imprimirPDF(itens: Reembolso[], filtros: string, titulo = 'Central das Solicitações de Reembolso') {
   const linhas = linhasExport(itens); const cab = linhas.length ? Object.keys(linhas[0]) : []
   const total = itens.reduce((s, r) => s + (Number(r.valor) || 0), 0)
   const w = window.open('', '_blank'); if (!w) return
@@ -1421,7 +1486,7 @@ function imprimirPDF(itens: Reembolso[], filtros: string) {
   w.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Reembolsos</title>
     <style>body{font-family:system-ui,Segoe UI,Arial,sans-serif;color:#1a1714;margin:32px}
     table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #d6d0c7;padding:6px 8px;text-align:left;vertical-align:top}th{background:#e7eefb;color:#002443}tfoot td{font-weight:bold;background:#f7f5f2}</style></head><body>
-    ${cabecalhoImpressaoHtml('Central das Solicitações de Reembolso', `${filtros || 'Sem filtros'} · ${itens.length} registro(s)`)}
+    ${cabecalhoImpressaoHtml(titulo, `${filtros || 'Sem filtros'} · ${itens.length} registro(s)`)}
     <table><thead><tr>${cab.map((c) => `<th>${c}</th>`).join('')}</tr></thead><tbody>${body}</tbody>
     <tfoot><tr><td colspan="${Math.max(1, cab.length - 3)}">Total</td><td>${formatBRL(total)}</td><td></td><td></td></tr></tfoot></table>
     <script>window.onload=function(){window.print()}</script></body></html>`)
