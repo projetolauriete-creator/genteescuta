@@ -571,6 +571,23 @@ function emAbertoReembolso(r: Reembolso): boolean {
   return estaPendente(s) || s === 'agendado'
 }
 
+/** Totais por bucket (quantidade e valor em R$) de uma lista de reembolsos.
+ *  Usado tanto nos cartões de "Minhas solicitações" quanto no resumo das
+ *  exportações, para os números baterem. "Aguardando" = pendente ou agendado;
+ *  "Pago" = efetivamente pago; "Recusado" = recusado. */
+function kpisReembolso(itens: Reembolso[]) {
+  let solicitadoV = 0, aguardN = 0, aguardV = 0, pagoN = 0, pagoV = 0, recusN = 0, recusV = 0
+  for (const r of itens) {
+    const v = Number(r.valor) || 0
+    solicitadoV += v
+    const s = statusEfetivo(r.status, r.data_pagamento)
+    if (emAbertoReembolso(r)) { aguardN++; aguardV += v }
+    else if (s === 'pago') { pagoN++; pagoV += v }
+    else if (s === 'recusado') { recusN++; recusV += v }
+  }
+  return { solicitadoN: itens.length, solicitadoV, aguardN, aguardV, pagoN, pagoV, recusN, recusV }
+}
+
 function ListaMinhas({ carregando, itens, perfil, aoAtualizar, setErro, setAviso }: {
   carregando: boolean; itens: Reembolso[]; perfil: Perfil; aoAtualizar: () => void
   setErro: (s: string | null) => void; setAviso: (s: string | null) => void
@@ -605,18 +622,7 @@ function ListaMinhas({ carregando, itens, perfil, aoAtualizar, setErro, setAviso
   }, [itens, busca, fMes, fStatus, fCategoria])
 
   // Totais recalculados conforme os filtros (sempre sobre as PRÓPRIAS solicitações).
-  const totais = useMemo(() => {
-    let solicitadoV = 0, aguardN = 0, aguardV = 0, pagoN = 0, pagoV = 0, recusN = 0, recusV = 0
-    for (const r of filtrados) {
-      const v = Number(r.valor) || 0
-      solicitadoV += v
-      const s = statusEfetivo(r.status, r.data_pagamento)
-      if (emAbertoReembolso(r)) { aguardN++; aguardV += v }
-      else if (s === 'pago') { pagoN++; pagoV += v }
-      else if (s === 'recusado') { recusN++; recusV += v }
-    }
-    return { solicitadoN: filtrados.length, solicitadoV, aguardN, aguardV, pagoN, pagoV, recusN, recusV }
-  }, [filtrados])
+  const totais = useMemo(() => kpisReembolso(filtrados), [filtrados])
 
   const emAberto = filtrados.filter(emAbertoReembolso)
   const concluido = filtrados.filter((r) => !emAbertoReembolso(r))
@@ -1469,6 +1475,17 @@ function baixarCSV(itens: Reembolso[], filtros: string, titulo = 'Central das So
 async function baixarXlsxReemb(itens: Reembolso[], filtros: string, titulo = 'Central das Solicitações de Reembolso') {
   const linhas = linhasExport(itens); if (linhas.length === 0) return
   const cab = Object.keys(linhas[0])
+  const k = kpisReembolso(itens)
+  // Resumo do topo (referente só ao que está sendo exportado).
+  const resumo = [
+    { rotulo: 'Total solicitado', qtd: k.solicitadoN, valor: formatBRL(k.solicitadoV) },
+    { rotulo: 'Aguardando', qtd: k.aguardN, valor: formatBRL(k.aguardV) },
+    { rotulo: 'Pago', qtd: k.pagoN, valor: formatBRL(k.pagoV) },
+    { rotulo: 'Recusado', qtd: k.recusN, valor: formatBRL(k.recusV) },
+  ]
+  // Linha de TOTAL no final: soma da coluna "Valor" de todas as linhas exportadas.
+  const idxValor = cab.indexOf('Valor')
+  const totalLinha = cab.map((_, i) => (i === 0 ? 'TOTAL' : i === idxValor ? formatBRL(k.solicitadoV) : ''))
   await exportarXlsx({
     nomeArquivo: `reembolsos-${new Date().toISOString().slice(0, 10)}`,
     titulo,
@@ -1476,6 +1493,8 @@ async function baixarXlsxReemb(itens: Reembolso[], filtros: string, titulo = 'Ce
     colunas: cab,
     linhas: linhas.map((l) => cab.map((c) => (l as any)[c] ?? '')),
     nomeAba: 'Reembolsos',
+    resumo,
+    totalLinha,
   })
 }
 function imprimirPDF(itens: Reembolso[], filtros: string, titulo = 'Central das Solicitações de Reembolso') {

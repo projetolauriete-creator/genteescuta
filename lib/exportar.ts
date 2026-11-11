@@ -55,6 +55,13 @@ async function logoBase64(): Promise<string | null> {
   }
 }
 
+/** Uma linha do bloco "Resumo" no topo da planilha (rótulo, quantidade, valor). */
+export interface ResumoXlsx {
+  rotulo: string
+  qtd: number
+  valor: string
+}
+
 export interface OpcoesXlsx {
   nomeArquivo: string
   titulo: string
@@ -64,6 +71,10 @@ export interface OpcoesXlsx {
   nomeAba?: string
   /** Larguras das colunas (opcional). */
   larguras?: number[]
+  /** Bloco de totais no topo (antes do cabeçalho das colunas). */
+  resumo?: ResumoXlsx[]
+  /** Linha de TOTAL no final (já formatada, mesmo número de colunas). */
+  totalLinha?: (string | number)[]
 }
 
 /** Excel (.xlsx) com o logo no topo, título/filtros/data e cabeçalho de colunas. */
@@ -87,8 +98,23 @@ export async function exportarXlsx(o: OpcoesXlsx): Promise<void> {
   ws.mergeCells(6, 1, 6, ncol)
   Object.assign(ws.getCell(6, 1), { value: rodapeGeracao(o.filtros), font: { size: 10, color: { argb: 'FF6B6B6B' } } })
 
+  // Bloco "Resumo" (totais do que está sendo exportado), quando houver.
+  let linhaCabecalho = 8
+  if (o.resumo && o.resumo.length) {
+    ws.mergeCells(8, 1, 8, ncol)
+    Object.assign(ws.getCell(8, 1), { value: 'Resumo (referente ao que foi exportado)', font: { bold: true, size: 11 } })
+    let rr = 9
+    for (const item of o.resumo) {
+      Object.assign(ws.getCell(rr, 1), { value: item.rotulo, font: { bold: true } })
+      Object.assign(ws.getCell(rr, 2), { value: item.qtd, alignment: { horizontal: 'left' } })
+      Object.assign(ws.getCell(rr, 3), { value: item.valor })
+      rr++
+    }
+    linhaCabecalho = rr + 1 // uma linha em branco antes da tabela
+  }
+
   // Cabeçalho das colunas (faixa azul da marca).
-  const hr = ws.getRow(8)
+  const hr = ws.getRow(linhaCabecalho)
   hr.values = o.colunas
   hr.eachCell((c) => {
     c.font = { bold: true, color: { argb: 'FFFFFFFF' } }
@@ -97,10 +123,20 @@ export async function exportarXlsx(o: OpcoesXlsx): Promise<void> {
   })
 
   // Dados.
-  let r = 9
+  let r = linhaCabecalho + 1
   for (const linha of o.linhas) {
     ws.getRow(r).values = linha
     r++
+  }
+
+  // Linha de TOTAL ao final (soma da coluna de valores), quando houver.
+  if (o.totalLinha && o.totalLinha.length) {
+    const tr = ws.getRow(r)
+    tr.values = o.totalLinha
+    tr.eachCell((c) => {
+      c.font = { bold: true }
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2EFEA' } }
+    })
   }
 
   const out = await wb.xlsx.writeBuffer()
