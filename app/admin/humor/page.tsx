@@ -627,20 +627,40 @@ const POR_PAGINA = 10
 // trabalham sobre o que já chega recortado por mês e centro de custo.
 function TabelaMarcacoes({ marcacoes }: { marcacoes: RegistroHumor[] }) {
   const [busca, setBusca] = useState('')
+  const [fHumor, setFHumor] = useState('')
+  const [fSetor, setFSetor] = useState('')
+  const [fDe, setFDe] = useState('')
+  const [fAte, setFAte] = useState('')
   const [pagina, setPagina] = useState(1)
+
+  // Setores presentes nos dados (já canônicos pela importação; o gestor só vê o
+  // seu). Usados como opções do filtro de setor, sem dividir a área por escrita.
+  const setoresOpc = useMemo(
+    () => Array.from(new Set(marcacoes.map((m) => m.setor).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'pt-BR')),
+    [marcacoes],
+  )
 
   const filtradas = useMemo(() => {
     const termo = normalizar(busca)
-    if (!termo) return marcacoes
-    return marcacoes.filter((m) => normalizar(m.funcionario || 'Não informado').includes(termo))
-  }, [marcacoes, busca])
+    return marcacoes.filter((m) => {
+      if (termo && !normalizar(m.funcionario || 'Não informado').includes(termo)) return false
+      if (fHumor && m.humor !== fHumor) return false
+      if (fSetor && m.setor !== fSetor) return false
+      if (fDe && (m.dia || '') < fDe) return false
+      if (fAte && (m.dia || '') > fAte) return false
+      return true
+    })
+  }, [marcacoes, busca, fHumor, fSetor, fDe, fAte])
+
+  const temFiltro = !!(busca || fHumor || fSetor || fDe || fAte)
+  function limparFiltros() { setBusca(''); setFHumor(''); setFSetor(''); setFDe(''); setFAte('') }
 
   const totalPaginas = Math.max(1, Math.ceil(filtradas.length / POR_PAGINA))
   // Se o filtro encolher a lista, não deixa a página passar do fim.
   const paginaAtual = Math.min(pagina, totalPaginas)
   useEffect(() => { if (pagina > totalPaginas) setPagina(totalPaginas) }, [pagina, totalPaginas])
-  // Volta para a primeira página sempre que a busca muda.
-  useEffect(() => { setPagina(1) }, [busca])
+  // Volta para a primeira página sempre que qualquer filtro muda.
+  useEffect(() => { setPagina(1) }, [busca, fHumor, fSetor, fDe, fAte])
 
   const inicio = (paginaAtual - 1) * POR_PAGINA
   const visiveis = filtradas.slice(inicio, inicio + POR_PAGINA)
@@ -651,18 +671,69 @@ function TabelaMarcacoes({ marcacoes }: { marcacoes: RegistroHumor[] }) {
 
   return (
     <div>
-      {/* Busca por nome */}
-      <div className="border-b border-borda px-4 py-3">
-        <div className="relative max-w-sm">
-          <Search size={15} aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-tinta-3" />
-          <input
-            type="search"
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-            placeholder="Buscar por nome do funcionário"
-            aria-label="Buscar por nome do funcionário"
-            className="w-full rounded-lg border border-borda-forte bg-white py-2 pl-9 pr-3 text-sm text-tinta placeholder:text-tinta-3 focus:border-marca focus:outline focus:outline-2 focus:outline-offset-[-1px] focus:outline-marca"
-          />
+      {/* Filtros: busca por nome + Humor + Setor + Data (combinados) */}
+      <div className="space-y-2.5 border-b border-borda px-4 py-3">
+        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="relative">
+            <Search size={15} aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-tinta-3" />
+            <input
+              type="search"
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              placeholder="Buscar por nome do funcionário"
+              aria-label="Buscar por nome do funcionário"
+              className="w-full rounded-lg border border-borda-forte bg-white py-2 pl-9 pr-3 text-sm text-tinta placeholder:text-tinta-3 focus:border-marca focus:outline focus:outline-2 focus:outline-offset-[-1px] focus:outline-marca"
+            />
+          </div>
+          <select
+            value={fHumor}
+            onChange={(e) => setFHumor(e.target.value)}
+            aria-label="Filtrar por humor"
+            className="w-full rounded-lg border border-borda-forte bg-white px-3 py-2 text-sm text-tinta focus:border-marca focus:outline focus:outline-2 focus:outline-offset-[-1px] focus:outline-marca"
+          >
+            <option value="">Todos os humores</option>
+            {HUMORES.map((h) => <option key={h} value={h}>{h}</option>)}
+          </select>
+          {setoresOpc.length > 1 && (
+            <select
+              value={fSetor}
+              onChange={(e) => setFSetor(e.target.value)}
+              aria-label="Filtrar por setor"
+              className="w-full rounded-lg border border-borda-forte bg-white px-3 py-2 text-sm text-tinta focus:border-marca focus:outline focus:outline-2 focus:outline-offset-[-1px] focus:outline-marca"
+            >
+              <option value="">Todos os setores</option>
+              {setoresOpc.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          )}
+          <div className="flex items-center gap-1.5">
+            <label className="sr-only" htmlFor="humor-de">Data inicial</label>
+            <input
+              id="humor-de"
+              type="date"
+              value={fDe}
+              max={fAte || undefined}
+              onChange={(e) => setFDe(e.target.value)}
+              className="w-full rounded-lg border border-borda-forte bg-white px-2.5 py-2 text-sm text-tinta focus:border-marca focus:outline focus:outline-2 focus:outline-offset-[-1px] focus:outline-marca"
+            />
+            <span className="flex-none text-xs text-tinta-3">até</span>
+            <label className="sr-only" htmlFor="humor-ate">Data final</label>
+            <input
+              id="humor-ate"
+              type="date"
+              value={fAte}
+              min={fDe || undefined}
+              onChange={(e) => setFAte(e.target.value)}
+              className="w-full rounded-lg border border-borda-forte bg-white px-2.5 py-2 text-sm text-tinta focus:border-marca focus:outline focus:outline-2 focus:outline-offset-[-1px] focus:outline-marca"
+            />
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-tinta-3">
+          <span className="tabular">{filtradas.length} marcação(ões){temFiltro ? ` de ${marcacoes.length}` : ''}</span>
+          {temFiltro && (
+            <button type="button" onClick={limparFiltros} className="font-medium text-tinta-2 transition-colors hover:text-marca">
+              Limpar filtros
+            </button>
+          )}
         </div>
       </div>
 
@@ -692,7 +763,7 @@ function TabelaMarcacoes({ marcacoes }: { marcacoes: RegistroHumor[] }) {
             {visiveis.length === 0 && (
               <tr>
                 <td colSpan={4} className="px-4 py-6 text-center text-sm text-tinta-3">
-                  Nenhum funcionário encontrado para “{busca.trim()}”.
+                  Nenhuma marcação encontrada para os filtros aplicados.
                 </td>
               </tr>
             )}
